@@ -126,7 +126,7 @@ services:
   # ----------------------------------------------------------------------
   db:
     profiles: ["postgres"]
-    image: postgres:16.4-alpine
+    image: postgres:18.7-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: "${POSTGRES_DB:-localcloud}"

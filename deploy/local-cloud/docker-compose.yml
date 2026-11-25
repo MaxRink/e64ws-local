@@ -1,0 +1,205 @@
+# Local cloud — deployment skeleton, now wired to a real service.
+#
+# What changed from the placeholder version: `api` is built from this repository
+# (deploy/local-cloud/Dockerfile, context = repo root) and serves the ten
+# recorded device-service routes from SQLite.  `tools/local_cloud/service.py`
+# answers 501 for every field docs/LOCAL_CLOUD_DESIGN.md marks
+# `unknown — needs capture`, so this stack is runnable but not device-ready.
+#
+# Default `docker compose up -d` starts: api, proxy (offline Caddyfile), admin.
+# Profiles:
+#   device-tls   proxy-device  - the design's mTLS edge; needs certs/ + pki/
+#                                (deploy/local-cloud/gen-dev-certs.sh makes dev
+#                                material).  Unhealthy until those files exist.
+#   offline      proxy-offline - plain HTTP :8088 and `tls internal` :8443, no
+#                                certificate files, exercises the API path.
+#   postgres     db            - template only; the service serves from SQLite.
+#   object-store objects       - template only; the MinIO tag does not pull.
+#
+# Before the first `up`:
+#   1. cp .env.example .env   (documented placeholders; fill in a real token)
+#   2. (optional, device-tls) sh gen-dev-certs.sh
+#   3. docker compose config --quiet
+#
+# No secret, key or token is stored in this file: everything comes from .env,
+# which is git-ignored, and .env.example holds placeholders only.
+
+name: local-cloud
+
+services:
+  # ----------------------------------------------------------------------
+  # API: the device-service skeleton (tools/local_cloud/service.py).
+  # Internal network only: no published port, no outbound route.
+  # ----------------------------------------------------------------------
+  api:
+    build:
+      # The service is the Python package tools/local_cloud, so the context has
+      # to be the repository root.
+      context: ../..
+      dockerfile: deploy/local-cloud/Dockerfile
+    image: local-cloud-service:dev
+    restart: unless-stopped
+    env_file:
+      # Missing file is not an error; every value has a safe default except the
+      # admin token, which then disables the admin API instead of opening it.
+      - path: .env
+        required: false
+    volumes:
+      - apidata:/var/lib/local-cloud
+    networks:
+      - internal
+    healthcheck:
+      # Stdlib only: the image has no curl.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------------------
+  # Edge (default): the offline Caddyfile.  No certificate files, no ACME, so
+  # it starts and validates anywhere.  It reverse-proxies the same API paths as
+  # the device edge, on :8088 (http) and :8443 (Caddy's internal CA).
+  # ----------------------------------------------------------------------
+  proxy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8088:8088"
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile.offline:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+      - internal
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------
+  # Edge (profile `device-tls`): the design's mTLS terminator for the hostname
+  # compiled into libNgxUi.so.  Needs certs/device-host.{crt,key} and
+  # pki/device-ca.pem; without them `caddy validate` fails and the container
+  # stays unhealthy - which is the honest state, not a configure bug.
+  # ----------------------------------------------------------------------
+  proxy-device:
+    profiles: ["device-tls"]
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+      - ./pki:/etc/caddy/pki:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge-device
+      - internal
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------
+  # State: PostgreSQL.  Template only - the service uses SQLite today, and the
+  # design's PostgreSQL target (docs/LOCAL_CLOUD_DESIGN.md §4) is not wired.
+  # ----------------------------------------------------------------------
+  db:
+    profiles: ["postgres"]
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-localcloud}"
+      POSTGRES_USER: "${POSTGRES_USER:-localcloud}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-replace-me}"
+      TZ: "UTC"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ----------------------------------------------------------------------
+  # Artifacts and raw captures: S3-compatible object store.  Template only;
+  # `minio/minio` was withdrawn from Docker Hub and Quay, so it does not pull.
+  # ----------------------------------------------------------------------
+  objects:
+    profiles: ["object-store"]
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${S3_ACCESS_KEY:-replace-me}"
+      MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY:-replace-me}"
+      TZ: "UTC"
+    volumes:
+      - objectdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ----------------------------------------------------------------------
+  # Admin: owner-only static console.  Bound to loopback only and on its own
+  # network; it must never be routed from the LAN-facing proxy.  The admin API
+  # itself lives on the `api` service and is token-gated.
+  # ----------------------------------------------------------------------
+  admin:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
+    ports:
+      - "127.0.0.1:8080:8080"   # loopback on the host only; no LAN listener
+    volumes:
+      - ./admin:/srv:ro
+    networks:
+      - admin
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  edge:
+  edge-device:
+  internal:
+    internal: true
+  admin:
+
+volumes:
+  apidata:
+  pgdata:
+  objectdata:
+  caddy_data:
+  caddy_config:

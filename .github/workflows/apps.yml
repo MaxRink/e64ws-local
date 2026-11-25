@@ -1,0 +1,64 @@
+name: apps
+
+# The app code was only ever verified by hand. These two jobs are the gate:
+# the iOS core is Foundation-only and runs on a stock macOS runner, and the
+# Android unit tests need a JDK and the SDK command-line tools, not an emulator.
+#
+# The instrumented Compose test and the live E2E suites are deliberately not
+# here: one needs an emulator, the other needs the simulator process, and both
+# are documented in apps/*/README.md as local runs.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - ".github/workflows/apps.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - ".github/workflows/apps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-core:
+    name: iOS core checks
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Report the toolchain
+        run: swift --version
+      - name: Build every target, including the E2E executable
+        working-directory: apps/ios/GrinderCore
+        run: swift build
+      - name: Run the portable checks
+        working-directory: apps/ios/GrinderCore
+        run: swift run GrinderCoreChecks
+
+  android-unit:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v4
+      - name: Install the platform the app compiles against
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
+      - name: Run the JVM tests
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+      - name: Upload the test report when it fails
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-test-report
+          path: apps/android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore

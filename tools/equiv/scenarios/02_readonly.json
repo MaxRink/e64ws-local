@@ -1,0 +1,260 @@
+{
+  "id": "02_readonly",
+  "title": "Shipped image: read-only WSS commands, development gate, sysfs and persistence files",
+  "profile": "shipped",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "r01",
+      "op": "mark",
+      "label": "read-only direct commands (accepted)"
+    },
+    {
+      "id": "r02",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 1
+    },
+    {
+      "id": "r03",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "type",
+      "equals": "RequestDriverStateResult"
+    },
+    {
+      "id": "r04",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "refId",
+      "equals": 1
+    },
+    {
+      "id": "r05",
+      "op": "capture",
+      "from": "last_reply",
+      "path": "data.sessionId",
+      "as": "session_id"
+    },
+    {
+      "id": "r06",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 2
+    },
+    {
+      "id": "r07a",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.sessionId",
+      "equals_ref": "session_id"
+    },
+    {
+      "id": "r07b",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.grindState",
+      "equals": "Idle"
+    },
+    {
+      "id": "r08",
+      "op": "wss",
+      "type": "RequestDriverConfig",
+      "msg_id": 3
+    },
+    {
+      "id": "r09",
+      "op": "wss",
+      "type": "RequestNachineInfo",
+      "msg_id": 4
+    },
+    {
+      "id": "r10",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.grinderType",
+      "equals": "E64 WS"
+    },
+    {
+      "id": "r11",
+      "op": "wss",
+      "type": "RequestOnboarding",
+      "msg_id": 5,
+      "data": {}
+    },
+    {
+      "id": "r12",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "refId",
+      "absent": true
+    },
+    {
+      "id": "r10",
+      "op": "mark",
+      "label": "development-only commands must be rejected on a shipped image"
+    },
+    {
+      "id": "r11",
+      "op": "wss",
+      "type": "RequestLogMessages",
+      "msg_id": 10
+    },
+    {
+      "id": "r12",
+      "op": "wss",
+      "type": "RequestAdcConfig",
+      "msg_id": 11
+    },
+    {
+      "id": "r13",
+      "op": "wss",
+      "type": "RequestConfigManagerSettings",
+      "msg_id": 12
+    },
+    {
+      "id": "r14",
+      "op": "wss",
+      "type": "CustomSignal1",
+      "msg_id": 13
+    },
+    {
+      "id": "r15",
+      "op": "wss",
+      "action": "Stop",
+      "msg_id": 14
+    },
+    {
+      "id": "r16",
+      "op": "wss",
+      "action": "SetLanguage",
+      "msg_id": 15,
+      "data": {
+        "language": "en"
+      }
+    },
+    {
+      "id": "r17",
+      "op": "mark",
+      "label": "unknown type and token policy"
+    },
+    {
+      "id": "r18",
+      "op": "wss",
+      "type": "NoSuchCommand",
+      "msg_id": 20
+    },
+    {
+      "id": "r19",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 21,
+      "token": false
+    },
+    {
+      "id": "r20",
+      "op": "wss",
+      "type": "RequestOnboarding",
+      "msg_id": 22,
+      "token": false
+    },
+    {
+      "id": "r21",
+      "op": "mark",
+      "label": "sysfs outputs"
+    },
+    {
+      "id": "r22",
+      "op": "shell",
+      "cmd": "for l in /sys/class/leds/*/brightness; do echo \"$l=$(cat $l)\"; done | sort"
+    },
+    {
+      "id": "r23",
+      "op": "shell",
+      "cmd": "echo backlight=$(cat /sys/class/backlight/backlight/brightness) power=$(cat /sys/class/backlight/backlight/bl_power)"
+    },
+    {
+      "id": "r24",
+      "op": "shell",
+      "cmd": "echo gpio59=$(cat /sys/class/gpio/gpio59/value) gpio60=$(cat /sys/class/gpio/gpio60/value) gpio61=$(cat /sys/class/gpio/gpio61/value 2>/dev/null)"
+    },
+    {
+      "id": "r25",
+      "op": "shell",
+      "cmd": "echo key=$(cat /sys/class/input/input1/device/gpio_value)"
+    },
+    {
+      "id": "r26",
+      "op": "shell",
+      "cmd": "ls -1 /sys/bus/iio/devices | sort | tr '\\n' ' '"
+    },
+    {
+      "id": "r27",
+      "op": "shell",
+      "cmd": "echo wd=$( [ -e /dev/watchdog ] && echo present || echo absent ) esp0=$( [ -e /dev/esps0 ] && echo present || echo absent ) uart=$( [ -e /dev/ttySTM1 ] && echo present || echo absent )"
+    },
+    {
+      "id": "r28",
+      "op": "mark",
+      "label": "persistent files"
+    },
+    {
+      "id": "r29",
+      "op": "shell",
+      "cmd": "ls -1 /db | sort | tr '\\n' ' '"
+    },
+    {
+      "id": "r30",
+      "op": "shell",
+      "cmd": "sqlite3 /db/HsgSqlite.db \"select key,value from settings order by key;\" | head -20"
+    },
+    {
+      "id": "r31",
+      "op": "shell",
+      "cmd": "grep -v powerOnCycles /db/machineCounters.json | tr -d ' \\n'; echo; cat /db/wifiConfig.json | tr -d ' \\n'; echo"
+    },
+    {
+      "id": "r32",
+      "op": "db",
+      "sql": "select count(*) as grind_rows from grind_log"
+    },
+    {
+      "id": "r33",
+      "op": "db",
+      "sql": "select count(*) as event_rows from event_log"
+    },
+    {
+      "id": "r34",
+      "op": "shell",
+      "cmd": "grep -v '\"id\":' /db/HsgConfig.json | sha256sum; grep -c ':' /db/HsgConfig.json"
+    },
+    {
+      "id": "r35",
+      "op": "mark",
+      "label": "ESP JSON heartbeats in a quiet window"
+    },
+    {
+      "id": "r36",
+      "op": "espjson.watch",
+      "ms": 1500
+    },
+    {
+      "id": "r37",
+      "op": "state",
+      "keep": [
+        "guest.leds",
+        "guest.backlight",
+        "guest.gpio59",
+        "guest.weight_g"
+      ]
+    },
+    {
+      "id": "r38",
+      "op": "assert",
+      "source": "state",
+      "path": "guest.gpio59",
+      "equals": "1"
+    }
+  ]
+}

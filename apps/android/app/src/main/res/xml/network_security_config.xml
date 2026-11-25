@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  LAN-only by design: cleartext is refused outright. The device uses a
+  self-signed certificate, which is trusted per-device through the app's
+  explicit "trust this device's certificate" opt-in (a stored SHA-256 pin),
+  never by disabling verification.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

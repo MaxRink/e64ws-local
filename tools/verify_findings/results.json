@@ -1,0 +1,272 @@
+[
+  {
+    "finding": "FW-03",
+    "check": "www-data sudoers",
+    "status": "PASS",
+    "evidence": "82:www-data ALL=(ALL) NOPASSWD: ALL"
+  },
+  {
+    "finding": "FW-07",
+    "check": "docroot TLS key",
+    "status": "PASS",
+    "evidence": "HTTP 200, 1679 bytes, sha256 match=True"
+  },
+  {
+    "finding": "SW-08",
+    "check": "/db mode",
+    "status": "FAIL",
+    "evidence": "drwxr-xr-x    3 root     root          1024 Oct 31 12:03 /db | -rw-r--r--    1 503      root        143360 Oct 31 11:48 /db/HsgSqlite.db | -rw-rw-rw-    1 503      root           324 Oct 31 12:03 /db/wifiConfig.json"
+  },
+  {
+    "finding": "SW-15",
+    "check": "PSK plaintext in /db",
+    "status": "PASS",
+    "evidence": "staPassword\": \"1-TheKingOfGrinders-2\""
+  },
+  {
+    "finding": "SW-16",
+    "check": "FastCGI socket / tmp perms",
+    "status": "FAIL",
+    "evidence": "drwxrwxrwt    4 root     root          3300 Oct 31 12:03 /tmp | srwxr-xr-x    1 www-data www-data         0 Oct 31 11:47 /tmp/php-fastcgi.socket-0"
+  },
+  {
+    "finding": "SW-17",
+    "check": "PHP strict mode",
+    "status": "PASS",
+    "evidence": "save_path=/tmp, strict_mode=Off"
+  },
+  {
+    "finding": "FW-26",
+    "check": "world-writable libs",
+    "status": "PASS",
+    "evidence": "-rwxrwxrwx    1 root     root        261600 Jan 19  2026 /usr/lib/libncurses.so.6.1 | -rwxrwxrwx    1 root     root          9444 Jan 19  2026 /usr/lib/libpanel.so.6.1"
+  },
+  {
+    "finding": "FW-27",
+    "check": "esp_hosted test binary",
+    "status": "PASS",
+    "evidence": "lrwxrwxrwx    1 root     root            13 Oct 31 11:47 /dev/esps0 -> /dev/vport0p1 | -rwxr-xr-x    1 root     root        165528 Jan 19  2026 /usr/bin/test.out (/dev/esps0 is a VM virtio symlink)"
+  },
+  {
+    "finding": "FLT-03",
+    "check": "PHP version",
+    "status": "PASS",
+    "evidence": "PHP 8.4.16 (cgi-fcgi) (built: Jan 19 2026 13:40:22) (NTS)"
+  },
+  {
+    "finding": "FW-34",
+    "check": "native HTTPS :30001",
+    "status": "PASS",
+    "evidence": "listener entries on 30001: 1 (TLS routes not probed: no python ssl/openssl in guest)"
+  },
+  {
+    "finding": "SW-13",
+    "check": "avahi serial file",
+    "status": "PASS",
+    "evidence": "serialno published in service file; avahi-daemon not running this boot"
+  },
+  {
+    "finding": "SW-14",
+    "check": "token files per page load",
+    "status": "PASS",
+    "evidence": "14 -> 17 /tmp/tok_* files after login + two index GETs"
+  },
+  {
+    "finding": "FW-15",
+    "check": "anti-downgrade reads NG2 file",
+    "status": "PASS",
+    "evidence": "VERSION_STRING=$(sed -n 's/.*\"VERSION_INT.*: \\([0-9]\\+\\),$/\\1/p' /usr/local/bin/HEM-NG2-HMI-S01-Version.json) | swupdate -l 7 -n -N $VERSION_STRING -i \"${SWU}\" -e emmc,${TARGET_APP} -k ${KEY_FILE}"
+  },
+  {
+    "finding": "FLT-02",
+    "check": "esptool test keys",
+    "status": "PASS",
+    "evidence": "ecdsa_secure_boot_signing_key2.pem"
+  },
+  {
+    "finding": "FLT-06",
+    "check": "fw_env.config / env.bin",
+    "status": "PASS",
+    "evidence": "fw_env.config=True; env.bin not in extracted rootfs tree"
+  },
+  {
+    "finding": "FW-01",
+    "check": "pre-auth root command injection",
+    "status": "PASS",
+    "evidence": "HTTP 200; -rw-r--r--    1 www-data www-data        49 Oct 31 12:03 /tmp/fw01_id | -rw-r--r--    1 root     root             0 Oct 31 12:03 /tmp/fw01_marker | uid=0(root) gid=0(root) groups=0(root),10(wheel)"
+  },
+  {
+    "finding": "FW-02",
+    "check": "SQLi auth bypass",
+    "status": "PASS",
+    "evidence": "HTTP 302 location=index.php digest=1$1$a$O/cjYc..."
+  },
+  {
+    "finding": "FW-06",
+    "check": "factory-default Owner auto-login",
+    "status": "FAIL",
+    "evidence": "settings has no Role.* rows; /index.php after /login.php -> 302 (no NULL row, no auto session)"
+  },
+  {
+    "finding": "FW-09",
+    "check": "password echo in login HTML",
+    "status": "PASS",
+    "evidence": "HTTP 200; value=\"FW09PROBE\" present=True"
+  },
+  {
+    "finding": "FW-11",
+    "check": "wifi page makes config 0666",
+    "status": "PASS",
+    "evidence": "wifi.php HTTP 200; -rw-rw-rw-    1 503      root           324 Oct 31 12:03 /db/wifiConfig.json"
+  },
+  {
+    "finding": "FW-17",
+    "check": "unauth update-state forgery",
+    "status": "PASS",
+    "evidence": "HTTP 200; state file: {\n    \"state\": \"UPDATE_FAILED\",\n    \"progress\": 0,\n    \"errorReason\": \"FW17PROBE\"\n}"
+  },
+  {
+    "finding": "FW-04",
+    "check": "unauthenticated handler reachability",
+    "status": "PASS",
+    "evidence": "GET /upload_swu.php -> 200, no session cookie, body=b'{\\n    \"message\": \"<font color=\\'red\\'>Illegal comm'"
+  },
+  {
+    "finding": "FW-05",
+    "check": "unauthenticated handler reachability",
+    "status": "PASS",
+    "evidence": "GET /upload_esp.php -> 200, no session cookie, body=b'{\\n    \"message\": \"<font color=\\'red\\'>Upload faile'"
+  },
+  {
+    "finding": "FW-14",
+    "check": "unauthenticated handler reachability",
+    "status": "PASS",
+    "evidence": "GET /upload_splash_screen.php -> 200, no session cookie, body=b'{\\n    \"message\": \"<font color=\\'red\\'>Upload faile'"
+  },
+  {
+    "finding": "SW-10",
+    "check": "trailing @ after JSON",
+    "status": "PASS",
+    "evidence": "HTTP 200; body ends with b'@'"
+  },
+  {
+    "finding": "SW-03",
+    "check": "uncaught 500 classes",
+    "status": "PASS",
+    "evidence": "rest_api.php/ping,login -> [500, 500] (dev build lacks www/dev/rest_api_dev.php)"
+  },
+  {
+    "finding": "SW-04",
+    "check": "PHP_SELF reflection",
+    "status": "FAIL",
+    "evidence": "HTTP 200; path-info payload reflected=False (lighttpd normalises to /login.php)"
+  },
+  {
+    "finding": "SW-07",
+    "check": "Host header open redirect",
+    "status": "FAIL",
+    "evidence": "HTTP 200 location="
+  },
+  {
+    "finding": "FW-13",
+    "check": "session cookie flags",
+    "status": "PASS",
+    "evidence": "Set-Cookie: PHPSESSID=8brfo2745rp0nejobkjc52p7iv; path=/"
+  },
+  {
+    "finding": "FW-33",
+    "check": "pre-session ping",
+    "status": "FAIL",
+    "evidence": "HTTP 500; body=b'' (REST is 500 in this dev build)"
+  },
+  {
+    "finding": "SW-18",
+    "check": "wifi.php role check",
+    "status": "PASS",
+    "evidence": "no sessionUserRole/role gate in wifi.php; page served with Owner session"
+  },
+  {
+    "finding": "FW-10",
+    "check": "destructive action over GET",
+    "status": "PASS",
+    "evidence": "app-tree/www/upload_swu.php contains 'imp_prepare'=True"
+  },
+  {
+    "finding": "FW-24",
+    "check": "single-quoted Bearer",
+    "status": "PASS",
+    "evidence": "app-tree/www/login.php contains \"'Authorization: Bearer $sessionToken'\"=True"
+  },
+  {
+    "finding": "FW-25",
+    "check": "dev flag written",
+    "status": "PASS",
+    "evidence": "app-tree/www/index.php contains '$_SESSION[\"dev\"]'=True"
+  },
+  {
+    "finding": "FW-20",
+    "check": "init exits ignored (loop, no status check)",
+    "status": "PASS",
+    "evidence": "rootfs-tree/etc/init.d/rcS contains 'for i in /etc/init.d/S??*'=True"
+  },
+  {
+    "finding": "FW-21",
+    "check": "unquoted UI_DEBUG_LEVEL",
+    "status": "PASS",
+    "evidence": "rootfs-tree/etc/init.d/S90app contains 'UI_DEBUG_LEVEL=$(cat /log/log_ui)'=True"
+  },
+  {
+    "finding": "FW-22",
+    "check": "rollback only on force",
+    "status": "PASS",
+    "evidence": "rootfs-tree/etc/init.d/S30verifyupdate contains 'use force instead'=True"
+  },
+  {
+    "finding": "FW-23",
+    "check": "single-quoted JSON, literal var",
+    "status": "PASS",
+    "evidence": "app-tree/bin/flashEspZip.sh contains 'exist ${SERIAL_TTY}'=True"
+  },
+  {
+    "finding": "FW-31",
+    "check": "non-constant-time compare",
+    "status": "PASS",
+    "evidence": "app-tree/www/checkLogin.php contains '== $hashedPassword'=True"
+  },
+  {
+    "finding": "FW-32",
+    "check": "predictable /tmp JSON",
+    "status": "PASS",
+    "evidence": "app-tree/www/constants.php contains '/tmp/wifiStaConfig.json'=True"
+  },
+  {
+    "finding": "FW-18",
+    "check": "pidfile kill",
+    "status": "PASS",
+    "evidence": "rootfs-tree/etc/init.d/S02emergencyFactoryReset contains 'xargs kill -9'=True"
+  },
+  {
+    "finding": "FW-19",
+    "check": "status file in /tmp",
+    "status": "PASS",
+    "evidence": "app-tree/bin/emergencyFactoryReset.sh contains 'emergencyFactoryResetStatus.json'=True"
+  },
+  {
+    "finding": "FW-29",
+    "check": "TLS errors ignored",
+    "status": "PASS",
+    "evidence": "app-tree/bin/NgxWsClient contains 'ignoreSslErrors'=True"
+  },
+  {
+    "finding": "FW-12",
+    "check": "DB left world-readable",
+    "status": "PASS",
+    "evidence": "app-tree/www/rest_api.php contains 'chmod a+r $dbFile'=True"
+  },
+  {
+    "finding": "SW-06",
+    "check": "hardcoded PSK string",
+    "status": "PASS",
+    "evidence": "app-tree/bin/libNgxUi.so contains 'KingOfGrinders'=True"
+  }
+]

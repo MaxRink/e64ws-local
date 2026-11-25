@@ -1,0 +1,9 @@
+# Runtime secrets and material — never commit.
+.env
+certs/
+pki/
+data/
+
+# The root .gitignore excludes `.env.*`, which would also swallow the documented
+# example file.  Re-include it: it holds placeholders only, no credentials.
+!.env.example

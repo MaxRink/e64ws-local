@@ -1,0 +1,1283 @@
+{
+  "rows": [
+    {
+      "id": "WSS-D01",
+      "surface": "wss",
+      "name": "RequestDriverConfig",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D02",
+      "surface": "wss",
+      "name": "RequestDriverState",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "07_malformed",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D03",
+      "surface": "wss",
+      "name": "RequestLogMessages",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D04",
+      "surface": "wss",
+      "name": "RequestAdcConfig",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D05",
+      "surface": "wss",
+      "name": "RequestConfigManagerSettings",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D06",
+      "surface": "wss",
+      "name": "RequestNachineInfo",
+      "covered": true,
+      "scenarios": [
+        "02_readonly"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D07",
+      "surface": "wss",
+      "name": "RequestOnboarding",
+      "covered": true,
+      "scenarios": [
+        "02_readonly"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D08",
+      "surface": "wss",
+      "name": "WifiStaConfig",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D09",
+      "surface": "wss",
+      "name": "WifiConfigChanged",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D10",
+      "surface": "wss",
+      "name": "UpdateDriverConfig",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D11",
+      "surface": "wss",
+      "name": "UpdateCpuConfig",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D12",
+      "surface": "wss",
+      "name": "CustomSignal1",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-D13",
+      "surface": "wss",
+      "name": "CustomSignal2",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A01",
+      "surface": "wss",
+      "name": "Stop",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "04_grind"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A02",
+      "surface": "wss",
+      "name": "StartGrindManual",
+      "covered": true,
+      "scenarios": [
+        "04_grind"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A03",
+      "surface": "wss",
+      "name": "StartGrindGbw",
+      "covered": true,
+      "scenarios": [
+        "04_grind"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A04",
+      "surface": "wss",
+      "name": "StartGrindGbt",
+      "covered": true,
+      "scenarios": [
+        "04_grind"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A05",
+      "surface": "wss",
+      "name": "StartCalibration",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A06",
+      "surface": "wss",
+      "name": "StartTara",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A07",
+      "surface": "wss",
+      "name": "SaveLog",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A08",
+      "surface": "wss",
+      "name": "ResetLog",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A09",
+      "surface": "wss",
+      "name": "SetFanTemperatureCtrlEnabled",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A10",
+      "surface": "wss",
+      "name": "SetFan1Duty",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions",
+        "05_persistence"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A11",
+      "surface": "wss",
+      "name": "SetFan2Duty",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A12",
+      "surface": "wss",
+      "name": "CalibrateFan1",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A13",
+      "surface": "wss",
+      "name": "CalibrateFan2",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A14",
+      "surface": "wss",
+      "name": "ToggleBacklightPower",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A15",
+      "surface": "wss",
+      "name": "SetBacklightBrightness",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions",
+        "05_persistence"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A16",
+      "surface": "wss",
+      "name": "EspFlashApp",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Drives esptool over /dev/ttySTM5 (stubbed in QEMU); no signed ESP image fixture is available and the path can block for the flash timeout."
+    },
+    {
+      "id": "WSS-A17",
+      "surface": "wss",
+      "name": "EspEraseFlash",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Drives esptool over /dev/ttySTM5 (stubbed in QEMU); no signed ESP image fixture is available and the path can block for the flash timeout."
+    },
+    {
+      "id": "WSS-A18",
+      "surface": "wss",
+      "name": "EspReset",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A19",
+      "surface": "wss",
+      "name": "NozzleLightRunStandby",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A20",
+      "surface": "wss",
+      "name": "NozzleLightStop",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A21",
+      "surface": "wss",
+      "name": "ResetDriverConfig",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A22",
+      "surface": "wss",
+      "name": "SetAgsaTargetDdValue",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A23",
+      "surface": "wss",
+      "name": "StopAgsa",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A24",
+      "surface": "wss",
+      "name": "CalibrateDdSensor",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A25",
+      "surface": "wss",
+      "name": "AddBrewEvent",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A26",
+      "surface": "wss",
+      "name": "GbsCreateReport",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A27",
+      "surface": "wss",
+      "name": "SetLanguage",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "03_dev_actions",
+        "05_persistence"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A28",
+      "surface": "wss",
+      "name": "RcTopLeftClick",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A29",
+      "surface": "wss",
+      "name": "RcTopLeftLong",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A30",
+      "surface": "wss",
+      "name": "RcTopLeftPress",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A31",
+      "surface": "wss",
+      "name": "RcTopLeftRelease",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A32",
+      "surface": "wss",
+      "name": "RcBottomLeftClick",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A33",
+      "surface": "wss",
+      "name": "RcRotaryClick",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A34",
+      "surface": "wss",
+      "name": "RcRotaryLong",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A35",
+      "surface": "wss",
+      "name": "RcRotaryDouble",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A36",
+      "surface": "wss",
+      "name": "RcRotary",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A37",
+      "surface": "wss",
+      "name": "StartEnduranceTest",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A38",
+      "surface": "wss",
+      "name": "StopEnduranceTest",
+      "covered": true,
+      "scenarios": [
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "WSS-A39",
+      "surface": "wss",
+      "name": "SetSetupWizardState",
+      "covered": true,
+      "scenarios": [
+        "03_dev_actions",
+        "05_persistence"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-01",
+      "surface": "rest",
+      "name": "ping",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "07_malformed"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-02",
+      "surface": "rest",
+      "name": "login",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "07_malformed"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-03",
+      "surface": "rest",
+      "name": "logout",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-04",
+      "surface": "rest",
+      "name": "check_session",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-05",
+      "surface": "rest",
+      "name": "update_session",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-06",
+      "surface": "rest",
+      "name": "get_machine_info",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-07",
+      "surface": "rest",
+      "name": "get_wifi_info",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-08",
+      "surface": "rest",
+      "name": "scan_wifi",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-09",
+      "surface": "rest",
+      "name": "request_onboarding",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Requires /tmp/onboardingRequest.json + NgxWsClient; the same handler is covered through WSS RequestOnboarding (02_readonly)."
+    },
+    {
+      "id": "REST-10",
+      "surface": "rest",
+      "name": "reboot",
+      "covered": false,
+      "scenarios": [],
+      "reason": "The REST route only shells out to `sudo reboot`; reboot behaviour is covered through the guest agent in 05_persistence."
+    },
+    {
+      "id": "REST-11",
+      "surface": "rest",
+      "name": "get_fw_update_state",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-12",
+      "surface": "rest",
+      "name": "download_database",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-13",
+      "surface": "rest",
+      "name": "download_machine_logs",
+      "covered": true,
+      "scenarios": [
+        "01_http"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "REST-14",
+      "surface": "rest",
+      "name": "upload_swu",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Destructive: `prepare` runs `rm -rf /storage/*` and requires a vendor-signed SWU. Not safe against the shared snapshot; covered by static review only."
+    },
+    {
+      "id": "REST-15",
+      "surface": "rest",
+      "name": "upload_esp",
+      "covered": true,
+      "scenarios": [
+        "07_malformed"
+      ],
+      "reason": "Invokes flashEspZip.sh /dev/ttySTM5 (stubbed in QEMU); no signed fixture is available."
+    },
+    {
+      "id": "REST-16",
+      "surface": "rest",
+      "name": "upload_splash",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Writes /config/custom-splash-screen and restarts the splash process; needs a 480x360 fixture, no behavioural value for the HMI core."
+    },
+    {
+      "id": "REST-17",
+      "surface": "rest",
+      "name": "wifi_save",
+      "covered": false,
+      "scenarios": [],
+      "reason": "Writes /tmp/wifiStaConfig.json then delegates to the same WifiStaConfig handler covered in 03_dev_actions."
+    },
+    {
+      "id": "ESP-101",
+      "surface": "esp.ctrl",
+      "name": "Req_GetMACAddress",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-102",
+      "surface": "esp.ctrl",
+      "name": "Req_SetMacAddress",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-103",
+      "surface": "esp.ctrl",
+      "name": "Req_GetWifiMode",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-104",
+      "surface": "esp.ctrl",
+      "name": "Req_SetWifiMode",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-105",
+      "surface": "esp.ctrl",
+      "name": "Req_GetAPScanList",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-106",
+      "surface": "esp.ctrl",
+      "name": "Req_GetAPConfig",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-107",
+      "surface": "esp.ctrl",
+      "name": "Req_ConnectAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-108",
+      "surface": "esp.ctrl",
+      "name": "Req_DisconnectAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-109",
+      "surface": "esp.ctrl",
+      "name": "Req_GetSoftAPConfig",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-110",
+      "surface": "esp.ctrl",
+      "name": "Req_SetSoftAPVendorSpecificIE",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-111",
+      "surface": "esp.ctrl",
+      "name": "Req_StartSoftAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-112",
+      "surface": "esp.ctrl",
+      "name": "Req_GetSoftAPConnectedSTAList",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-113",
+      "surface": "esp.ctrl",
+      "name": "Req_StopSoftAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-114",
+      "surface": "esp.ctrl",
+      "name": "Req_SetPowerSaveMode",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-115",
+      "surface": "esp.ctrl",
+      "name": "Req_GetPowerSaveMode",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-116",
+      "surface": "esp.ctrl",
+      "name": "Req_OTABegin",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-117",
+      "surface": "esp.ctrl",
+      "name": "Req_OTAWrite",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-118",
+      "surface": "esp.ctrl",
+      "name": "Req_OTAEnd",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-119",
+      "surface": "esp.ctrl",
+      "name": "Req_SetWifiMaxTxPower",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-120",
+      "surface": "esp.ctrl",
+      "name": "Req_GetWifiCurrTxPower",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-121",
+      "surface": "esp.ctrl",
+      "name": "Req_ConfigHeartbeat",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-301",
+      "surface": "esp.ctrl",
+      "name": "ESPInit",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-302",
+      "surface": "esp.ctrl",
+      "name": "Heartbeat",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-303",
+      "surface": "esp.ctrl",
+      "name": "StationDisconnectFromAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESP-304",
+      "surface": "esp.ctrl",
+      "name": "StationDisconnectFromESPSoftAP",
+      "covered": true,
+      "scenarios": [
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-01",
+      "surface": "esp.json",
+      "name": "{\"ping\":true}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-02",
+      "surface": "esp.json",
+      "name": "{\"pong\":true}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-03",
+      "surface": "esp.json",
+      "name": "{\"type\":\"RequestVersion\"}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-04",
+      "surface": "esp.json",
+      "name": "{\"versionNo\":\"01.11\",\"versionDate\":\"16.12.2025\"}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-05",
+      "surface": "esp.json",
+      "name": "{\"type\":\"RequestSdioStatus\"}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-06",
+      "surface": "esp.json",
+      "name": "{\"sdioStatus\":1,...}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-07",
+      "surface": "esp.json",
+      "name": "{\"type\":\"StartFunction\",\"function\":2,...}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "ESPU-08",
+      "surface": "esp.json",
+      "name": "{\"requestConfig\":true}",
+      "covered": true,
+      "scenarios": [
+        "02_readonly",
+        "06_esp"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-01",
+      "surface": "sysfs",
+      "name": "/sys/class/input/input1/device/gpio_value",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-02",
+      "surface": "sysfs",
+      "name": "/sys/class/leds/{AGSA_*,FAN1_EN,FAN2_EN,USB_EN}/brightness",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-03",
+      "surface": "sysfs",
+      "name": "/sys/class/backlight/backlight/{brightness,bl_power}",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-04",
+      "surface": "sysfs",
+      "name": "/sys/class/gpio/{export,gpio59,gpio60}/{direction,value}",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-05",
+      "surface": "sysfs",
+      "name": "/dev/watchdog",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-06",
+      "surface": "sysfs",
+      "name": "/sys/bus/iio/devices/iio:device3..6/*",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-07",
+      "surface": "sysfs",
+      "name": "/sys/bus/platform/.../stm32-one-pulse, stm32-timers",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-08",
+      "surface": "sysfs",
+      "name": "/sys/bus/nvmem/devices/stm32-romem0/nvmem",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "IO-09",
+      "surface": "sysfs",
+      "name": "/dev/mem (MPC157 registers)",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "FS-01",
+      "surface": "files",
+      "name": "/db (HsgSqlite.db, HsgConfig.json, machineCounters.json, wifiConfig.json, webui.crt|key)",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "FS-02",
+      "surface": "files",
+      "name": "/tmp (tok_*, onboardingRequest.json, wifiStaConfig.json, FirmwareUpdateState.json, esp.zip)",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "FS-03",
+      "surface": "files",
+      "name": "/storage (chunk.dat, update.swu)",
+      "covered": true,
+      "scenarios": [
+        "01_http",
+        "02_readonly",
+        "03_dev_actions",
+        "04_grind",
+        "05_persistence",
+        "06_esp",
+        "08_hw_paths"
+      ],
+      "reason": "Only written by upload_swu.php prepare, which is destructive (rm -rf /storage/*)."
+    },
+    {
+      "id": "PWR-01",
+      "surface": "power",
+      "name": "reboot / poweroff via REST, WSS, guest init",
+      "covered": true,
+      "scenarios": [
+        "05_persistence"
+      ],
+      "reason": ""
+    },
+    {
+      "id": "LOG-01",
+      "surface": "log",
+      "name": "serial console (/dev/console)",
+      "covered": false,
+      "scenarios": [],
+      "reason": ""
+    }
+  ],
+  "by_surface": {
+    "wss": {
+      "covered": 50,
+      "total": 52
+    },
+    "rest": {
+      "covered": 12,
+      "total": 17
+    },
+    "esp.ctrl": {
+      "covered": 25,
+      "total": 25
+    },
+    "esp.json": {
+      "covered": 8,
+      "total": 8
+    },
+    "sysfs": {
+      "covered": 9,
+      "total": 9
+    },
+    "files": {
+      "covered": 3,
+      "total": 3
+    },
+    "power": {
+      "covered": 1,
+      "total": 1
+    },
+    "log": {
+      "covered": 0,
+      "total": 1
+    }
+  },
+  "covered": 108,
+  "total": 116
+}

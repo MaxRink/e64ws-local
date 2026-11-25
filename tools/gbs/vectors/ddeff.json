@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "firmware_build": "HEM-HSG-HMI-S01 V01.16-24",
+  "algorithm": "DdEff",
+  "vectors": [
+    {
+      "id": "ddeff/18-call-sequence",
+      "provenance": "V",
+      "source": "docs/GBS_ALGORITHMS.md:357-370 (worked example: 1000 Dum -> six 1000, six 800, six 1200); tests/test_local_clients.py:439-443.",
+      "algorithm": "DdEff",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "toleranceMs": 1000,
+          "calls": 18,
+          "reset": true
+        }
+      ],
+      "expected": [
+        {
+          "phase": "measurement",
+          "sequence": [
+            1000,
+            1000,
+            1000,
+            1000,
+            1000,
+            1000,
+            800,
+            800,
+            800,
+            800,
+            800,
+            800,
+            1200,
+            1200,
+            1200,
+            1200,
+            1200,
+            1200
+          ],
+          "candidateDdDum": 1200,
+          "returnedDdDum": 1200,
+          "committed": false,
+          "index": 18
+        }
+      ],
+      "comment": "Eighteen calls in one request. The offsets are 0, -200, +200 applied in six-call blocks; the brew arguments are ignored."
+    },
+    {
+      "id": "ddeff/cross-phase-resume",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:357-370: progress is call-driven and persists across requests. Hand-derived block boundaries.",
+      "algorithm": "DdEff",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "toleranceMs": 1000,
+          "calls": 5,
+          "reset": true
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "toleranceMs": 1000,
+          "calls": 7,
+          "reset": false
+        }
+      ],
+      "expected": [
+        {
+          "phase": "measurement",
+          "sequence": [
+            1000,
+            1000,
+            1000,
+            1000,
+            1000
+          ],
+          "candidateDdDum": 1000,
+          "returnedDdDum": 1000,
+          "committed": false,
+          "index": 5
+        },
+        {
+          "phase": "measurement",
+          "sequence": [
+            1000,
+            800,
+            800,
+            800,
+            800,
+            800,
+            800
+          ],
+          "candidateDdDum": 800,
+          "returnedDdDum": 800,
+          "committed": false,
+          "index": 12
+        }
+      ],
+      "comment": "Call 1 stops one step before the first phase boundary. Call 2 resumes at index 5: one more 1000, then six 800s, ending at index 12. A reset between the calls would restart at 1000 and fail this vector.",
+      "postState": {
+        "initialDdDum": 1000,
+        "index": 12
+      }
+    },
+    {
+      "id": "ddeff/reset-restarts-phase-zero",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:357-370 and docs/GBS_PARITY_REVIEW.md:GBS-P11 (reset before first call, after a phase, and after a partial phase).",
+      "algorithm": "DdEff",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "toleranceMs": 1000,
+          "calls": 8,
+          "reset": true
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 700,
+          "toleranceMs": 1000,
+          "calls": 2,
+          "reset": true
+        }
+      ],
+      "expected": [
+        {
+          "phase": "measurement",
+          "sequence": [
+            1000,
+            1000,
+            1000,
+            1000,
+            1000,
+            1000,
+            800,
+            800
+          ],
+          "candidateDdDum": 800,
+          "returnedDdDum": 800,
+          "committed": false,
+          "index": 8
+        },
+        {
+          "phase": "measurement",
+          "sequence": [
+            700,
+            700
+          ],
+          "candidateDdDum": 700,
+          "returnedDdDum": 700,
+          "committed": false,
+          "index": 2
+        }
+      ],
+      "comment": "Call 1 crosses one phase boundary; call 2 resets to a different initial value and restarts at phase zero. The index restarts too, which is the observable side of GBS-P11's 'reset timing' question."
+    }
+  ]
+}

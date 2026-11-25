@@ -1,0 +1,21 @@
+# Applets enabled by the vendor but absent from Buildroot 2022.02.3's busybox.config
+CONFIG_BLOCKDEV=y
+CONFIG_FTPGET=y
+CONFIG_FTPPUT=y
+CONFIG_IOSTAT=y
+CONFIG_RDEV=y
+
+# Applets disabled by the vendor (provided by procps-ng, iproute2, ifupdown, tar, sysvinit)
+# CONFIG_FREE is not set
+# CONFIG_IFDOWN is not set
+# CONFIG_IFUP is not set
+# CONFIG_IP is not set
+# CONFIG_KILL is not set
+# CONFIG_KILLALL5 is not set
+# CONFIG_PIDOF is not set
+# CONFIG_PS is not set
+# CONFIG_SYSCTL is not set
+# CONFIG_TAR is not set
+# CONFIG_TOP is not set
+# CONFIG_UPTIME is not set
+# CONFIG_WATCH is not set

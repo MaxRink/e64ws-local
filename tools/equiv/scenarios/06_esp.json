@@ -1,0 +1,115 @@
+{
+  "id": "06_esp",
+  "title": "ESP co-processor surfaces: control-protocol events, JSON UART heartbeats, wifi scan bridge",
+  "profile": "dev",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "e01",
+      "op": "state",
+      "keep": [
+        "esp.mode",
+        "esp.connected",
+        "esp.ssid",
+        "esp.scan",
+        "esp.softap.ssid",
+        "espjson.version"
+      ]
+    },
+    {
+      "id": "e02",
+      "op": "mark",
+      "label": "asynchronous control-protocol events"
+    },
+    {
+      "id": 302,
+      "op": "esp.event",
+      "data": "0801",
+      "settle_ms": 500
+    },
+    {
+      "id": 301,
+      "op": "esp.event",
+      "data": "",
+      "settle_ms": 500
+    },
+    {
+      "id": 303,
+      "op": "esp.event",
+      "data": "",
+      "settle_ms": 500
+    },
+    {
+      "id": 304,
+      "op": "esp.event",
+      "data": "0a06020000000009",
+      "settle_ms": 500
+    },
+    {
+      "id": "e07",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 1
+    },
+    {
+      "id": "e08",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.espAlive",
+      "equals": true
+    },
+    {
+      "id": "e09",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.espVersionNo",
+      "equals": "01.11"
+    },
+    {
+      "id": "e10",
+      "op": "mark",
+      "label": "HMI -> ESP JSON UART traffic"
+    },
+    {
+      "id": "e11",
+      "op": "espjson.watch",
+      "ms": 2000
+    },
+    {
+      "id": "e12",
+      "op": "mark",
+      "label": "vendored wifi bridge requests (EspWifiConfig -u)"
+    },
+    {
+      "id": "e13",
+      "op": "shell",
+      "cmd": "/usr/local/bin/EspWifiConfig -u 2>&1 | head -c 1200",
+      "timeout": 40
+    },
+    {
+      "id": "e14",
+      "op": "state",
+      "keep": [
+        "esp.requests",
+        "esp.mode",
+        "esp.scan"
+      ]
+    },
+    {
+      "id": "e15",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 2
+    },
+    {
+      "id": "e16",
+      "op": "state",
+      "keep": [
+        "espjson.version",
+        "espjson.sdio_status",
+        "esp.mode"
+      ]
+    }
+  ]
+}

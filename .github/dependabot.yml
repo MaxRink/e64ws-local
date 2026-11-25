@@ -1,0 +1,114 @@
+version: 2
+
+# Dependabot covers every manifest in this repository that declares
+# dependencies.
+#
+# The repository's own tooling is deliberately standard-library-only, but it
+# still has manifests: the reimplementation's requirements, the Android Gradle
+# build, two Dockerfiles and the local-cloud compose stack. Alerts and
+# automated security fixes are enabled at repository level; this file is what
+# makes version updates arrive too.
+#
+# Deliberately absent, with the reason:
+#   - swift, both packages: tools/vm-app/Package.swift and
+#     apps/ios/GrinderCore/Package.swift declare no dependencies;
+#   - gomod: tools/mqttd/go.mod imports the standard library only and has no
+#     require block, although the module is cross-built per
+#     docs/bible/operations.md;
+#   - npm, pub, gitsubmodule and devcontainers: this repository has no
+#     package.json, pubspec.yaml, .gitmodules or devcontainer.json.
+
+updates:
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    groups:
+      python-tools:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: /tools/reimpl
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:10"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    groups:
+      python-reimpl:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:20"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    # Minor and patch arrive grouped; a major (including the Android Gradle
+    # plugin, which Dependabot names by its bare plugin id com.android.application)
+    # stays a single ungrouped PR so the SDK platform can move with it.
+    groups:
+      android-gradle:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /docker/dev-env
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:40"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: /tools/rebuild/buildroot/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:45"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker-compose
+    directory: /deploy/local-cloud
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:50"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

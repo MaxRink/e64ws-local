@@ -1,0 +1,23 @@
+{
+  "name": "vendor",
+  "kind": "vg",
+  "description": "Vendor HMI (HEM-HSG-HMI-S01 V01.16-24) in the virtual grinder, driven through the vg control daemon.",
+  "daemon_sock": "/tmp/virtual-grinder/run/vg.sock",
+  "http": "http://127.0.0.1:38082",
+  "https": "https://127.0.0.1:38443",
+  "wss": "wss://127.0.0.1:39997",
+  "timeout": 30,
+  "reset_cmd": "/etc/init.d/S90app stop; sleep 2; rm -rf /db/*; tar -xpf /storage/equiv/db-pristine.tar -C /db; sqlite3 /db/HsgSqlite.db < /storage/equiv/owner.sql; rm -f /tmp/tok_* /tmp/onboardingRequest.json /tmp/wifiStaConfig.json /tmp/FirmwareUpdateState.json /tmp/esp.zip; sync; /etc/init.d/S90app start >/dev/console 2>&1; sleep 6; echo reset-ok",
+  "profiles": {
+    "shipped": {
+      "cmd": "printf 'custom image, VERSION: HEM-HSG.140-git-g273ab65 (built through jenkins@36a955b69793 on Tue, 23 Jun 2026 11:02:11 +0000)' > /etc/issue; /etc/init.d/S90app restart >/dev/console 2>&1; echo profile-shipped"
+    },
+    "dev": {
+      "cmd": "printf 'development image, VERSION: HEM-HSG.140-git-g273ab65 (built through jenkins@36a955b69793 on Tue, 23 Jun 2026 11:02:11 +0000)' > /etc/issue; /etc/init.d/S90app restart >/dev/console 2>&1; echo profile-dev"
+    }
+  },
+  "notes": [
+    "reset_cmd restores the pristine /db snapshot taken from the vendor image and provisions the FIXTURE-OWNER-PASSWORD owner hash used by 01_http.",
+    "profiles switch /etc/issue (14-token dev gate) and restart NgxUiApp; see docs/DEV_MODE_AND_LOCAL_CONTROL.md."
+  ]
+}

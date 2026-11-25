@@ -1,0 +1,9 @@
+<resources>
+    <!-- A platform theme for the window; all UI is drawn by Compose, which
+         provides the Material 3 colours itself. No Material Components
+         dependency is pulled in. -->
+    <style name="Theme.E64Local" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

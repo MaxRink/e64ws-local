@@ -1,0 +1,88 @@
+# Caddyfile.offline — the local-cloud edge, minus certificates.
+#
+# Why this file exists: `Caddyfile` terminates TLS for the device hostname and
+# therefore cannot even be validated before an owner has created certs/ and
+# pki/. Verified with caddy:2.8.4-alpine:
+#
+#   docker run --rm -v "$PWD":/cfg caddy:2.8.4-alpine \
+#     caddy validate --config /cfg/Caddyfile --adapter caddyfile
+#   Error: ... loading certificates: open /etc/caddy/certs/device-host.crt:
+#   no such file or directory
+#
+# This variant needs no files, no ACME and no internet:
+#
+#   * :8088  plain HTTP, the same reverse-proxy path the real edge uses;
+#   * :8443  TLS from Caddy's own local CA (`tls internal`), so the HTTPS path
+#            can be exercised without inventing an owner CA.
+#
+# What it does NOT exercise: the device hostname, client-certificate
+# verification, and the 826-byte trust-slot constraints.  Those need the owner
+# CA and the real `Caddyfile` (docs/LOCAL_CLOUD_DESIGN.md §7).
+#
+# Run it from deploy/local-cloud/ with the compose profile:
+#
+#   docker compose --profile offline up -d proxy-offline
+#   curl -s http://127.0.0.1:8088/ping
+#   curl -s http://127.0.0.1:8088/api/device-service/system/time
+#   curl -sk https://localhost:8443/ping
+
+{
+	admin off
+	# No ACME anywhere: this host is not reachable from the public internet.
+	# `local_certs` makes every certificate Caddy issues internal to this host.
+	local_certs
+	auto_https disable_redirects
+}
+
+# --- plain HTTP: what the offline smoke test uses ---------------------------
+:8088 {
+	request_body {
+		# docs/LOCAL_CLOUD_DESIGN.md §8: 1 MiB for device-event/fire.
+		max_size 1MB
+	}
+
+	handle /api/device-service/* {
+		reverse_proxy api:8080
+	}
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	handle /ping {
+		respond "local-cloud offline edge" 200
+	}
+	handle {
+		respond "not found" 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# --- HTTPS from Caddy's own local CA (no files needed) ---------------------
+localhost:8443 {
+	tls internal
+
+	request_body {
+		max_size 1MB
+	}
+
+	# Per-device limits from design §8 are not expressible in Caddy core; the
+	# service refuses anonymous requests on its own until an owner enrols a
+	# fingerprint through the admin API.
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	handle /ping {
+		respond "local-cloud offline edge (tls)" 200
+	}
+	handle {
+		respond "not found" 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

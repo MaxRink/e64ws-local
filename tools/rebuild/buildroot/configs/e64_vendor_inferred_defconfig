@@ -1,0 +1,24 @@
+# Inferred from shipped rootfs 1.16-24 (Buildroot 2022.02.3, MMI-SW.640-rc3)
+# Evidence: PHP configure string, ELF attributes, dynamic flags, version strings.
+BR2_arm=y
+BR2_cortex_a7=y
+BR2_ARM_FPU_VFPV4D16=y
+BR2_ARM_EABIHF=y
+
+# Toolchain (Buildroot internal): gcc 10.3.0, binutils 2.36.1, glibc 2.34, headers 5.10
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_GCC_VERSION_10_X=y
+BR2_BINUTILS_VERSION_2_36_X=y
+BR2_KERNEL_HEADERS_5_10=y
+
+# Build options observed in shipped PHP: -O3 -g0 -D_FORTIFY_SOURCE=2
+BR2_OPTIMIZE_3=y
+BR2_PIC_PIE=y
+BR2_RELRO_PARTIAL=y
+BR2_SSP_STRONG=y
+BR2_FORTIFY_SOURCE_2=y
+# BR2_PER_PACKAGE_DIRECTORIES is not set  # vendor used it; disabled here to avoid BR 2022.02.3 make-toolchain bug
+
+BR2_TARGET_GENERIC_HOSTNAME="e64ws"
+BR2_TARGET_GENERIC_ISSUE="e64ws"

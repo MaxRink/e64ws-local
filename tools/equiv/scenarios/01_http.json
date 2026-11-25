@@ -1,0 +1,180 @@
+{
+  "id": "01_http",
+  "title": "Public and authenticated REST surface, session lifecycle, upload side effects",
+  "profile": "shipped",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "h01",
+      "op": "http",
+      "method": "GET",
+      "path": "/",
+      "secure": false,
+      "note": "plain HTTP must redirect to TLS"
+    },
+    {
+      "id": "h02",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/ping",
+      "note": "no session -> expired"
+    },
+    {
+      "id": "h03",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/get_machine_info",
+      "note": "pre-auth route"
+    },
+    {
+      "id": "h04",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/login",
+      "json": {
+        "userRole": "Owner",
+        "password": "e64-equivalence"
+      },
+      "note": "FIXTURE-OWNER-PASSWORD; hash is provisioned by reset_cmd"
+    },
+    {
+      "id": "h05",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/check_session",
+      "session": true
+    },
+    {
+      "id": "h06",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/ping",
+      "session": true
+    },
+    {
+      "id": "h07",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/get_wifi_info",
+      "session": true
+    },
+    {
+      "id": "h08",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/scan_wifi",
+      "session": true,
+      "timeout": 40
+    },
+    {
+      "id": "h09",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/get_fw_update_state",
+      "session": true
+    },
+    {
+      "id": "h10",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/download_database",
+      "session": true,
+      "binary_mode": "len",
+      "timeout": 40
+    },
+    {
+      "id": "h11",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/download_machine_logs",
+      "session": true,
+      "binary_mode": "len",
+      "timeout": 40
+    },
+    {
+      "id": "h12",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/update_session",
+      "session": true
+    },
+    {
+      "id": "h13",
+      "op": "http",
+      "method": "GET",
+      "path": "/rest_api.php/ping",
+      "session": true
+    },
+    {
+      "id": "h14",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/logout",
+      "session": true
+    },
+    {
+      "id": "h15",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/ping",
+      "session": true,
+      "note": "after logout -> expired"
+    },
+    {
+      "id": "h16",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/login",
+      "json": {
+        "userRole": "Owner",
+        "password": "wrong-password"
+      }
+    },
+    {
+      "id": "h17",
+      "op": "http",
+      "method": "POST",
+      "path": "/rest_api/ping",
+      "auth": true
+    },
+    {
+      "id": "h18",
+      "op": "shell",
+      "cmd": "ls /tmp/HemroHsg* 2>/dev/null | sed -E 's#.*/##; s/_[0-9]{8}_[0-9]{6}//' | sort | tr '\\n' ' '"
+    },
+    {
+      "id": "h19",
+      "op": "shell",
+      "cmd": "ls /tmp | grep -Ev '^(sess_|tok_)' | grep -Ev '_[0-9]{8}_[0-9]{6}\\.' | sort | tr '\\n' ' '"
+    },
+    {
+      "id": "h20",
+      "op": "db",
+      "sql": "select (select count(*) from grind_log) as grind_rows, (select count(*) from event_log) as event_rows, (select count(*) from settings) as settings_rows"
+    },
+    {
+      "id": "h21",
+      "op": "state",
+      "keep": [
+        "esp.frames_rx",
+        "esp.requests",
+        "guest.backlight"
+      ]
+    },
+    {
+      "id": "h22",
+      "op": "assert",
+      "source": "last_http",
+      "path": "status",
+      "equals": 400
+    },
+    {
+      "id": "h23",
+      "op": "assert",
+      "source": "state",
+      "path": "guest.backlight",
+      "equals": "7"
+    }
+  ]
+}

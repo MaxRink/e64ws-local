@@ -1,0 +1,8 @@
+# --- appended to the bootloader project's sdkconfig.defaults -----------------
+# The vendor's bootloader console is UART1 on GPIO18 (TX) / GPIO19 (RX).
+# Setting these four keys is the *only* change needed to turn the 91.77 %
+# rebuild into a 100.00 % byte-identical one.
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_1=y      # -> CONFIG_ESP_CONSOLE_UART_NUM=1
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=18
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=19

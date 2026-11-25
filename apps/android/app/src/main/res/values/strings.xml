@@ -1,0 +1,121 @@
+<resources>
+    <string name="app_name">E64 Local</string>
+    <string name="app_tagline">Cloud-free owner access for your grinder</string>
+
+    <!-- Setup wizard -->
+    <string name="setup_title">Connect to your grinder</string>
+    <string name="setup_host_label">Device address (IP or host name)</string>
+    <string name="setup_host_hint">192.168.1.100</string>
+    <string name="setup_password_label">Owner password (leave empty if none)</string>
+    <string name="setup_probe">Probe device</string>
+    <string name="setup_probe_failed">Could not reach the device</string>
+    <string name="setup_trust_title">Trust this device\'s certificate?</string>
+    <string name="setup_trust_yes">Trust this certificate</string>
+    <string name="setup_trust_no">Cancel</string>
+    <string name="setup_install">Install local API (one click)</string>
+    <string name="setup_confirm_title">Confirm the root step</string>
+    <string name="setup_confirm_run">Run these commands on the device</string>
+    <string name="setup_confirm_cancel">Cancel</string>
+    <string name="setup_devmode_warning">This device is not running a development image; the local API will refuse to answer.</string>
+    <string name="setup_success">Local Owner API v1 is installed</string>
+
+    <!-- Dashboard -->
+    <string name="tab_dashboard">Dashboard</string>
+    <string name="tab_logs">Logs</string>
+    <string name="tab_data">Data</string>
+    <string name="tab_actions">Actions</string>
+    <string name="tab_about">About</string>
+    <string name="dashboard_connection">Connection</string>
+    <string name="dashboard_not_connected">No device configured</string>
+    <string name="dashboard_model">Model</string>
+    <string name="dashboard_firmware">Firmware</string>
+    <string name="dashboard_variant">Variant</string>
+    <string name="dashboard_serial">Serial (hashed)</string>
+    <string name="dashboard_serial_note">The raw serial number is never returned by this API.</string>
+    <string name="dashboard_refresh">Refresh</string>
+    <string name="dashboard_api_version">API version</string>
+    <string name="dashboard_routes">Routes</string>
+    <string name="dashboard_devmode">Development mode</string>
+
+    <!-- Logs -->
+    <string name="logs_grind">Grind</string>
+    <string name="logs_service">Service</string>
+    <string name="logs_alert">Alert</string>
+    <string name="logs_since">Since (YYYY-MM-DD)</string>
+    <string name="logs_until">Until (YYYY-MM-DD)</string>
+    <string name="logs_apply">Apply filters</string>
+    <string name="logs_prev">Previous page</string>
+    <string name="logs_next">Next page</string>
+    <string name="logs_empty">No rows</string>
+    <string name="logs_more_hint">More rows may exist on the next page.</string>
+
+    <!-- Data -->
+    <string name="data_recipes">Recipes</string>
+    <string name="data_portafilters">Portafilters</string>
+    <string name="data_settings">Settings</string>
+    <string name="data_config">Config</string>
+    <string name="data_file">File</string>
+    <string name="data_file_path_label">Path (allowlisted)</string>
+    <string name="data_file_read">Read file</string>
+    <string name="data_redacted">Redacted by the device</string>
+
+    <!-- Actions -->
+    <string name="actions_title">Action layer</string>
+    <string name="actions_gate">Gate</string>
+    <string name="actions_enabled">Enabled</string>
+    <string name="actions_disabled">Disabled</string>
+    <string name="actions_allowed">Allowed</string>
+    <string name="actions_blocked">Blocked</string>
+    <string name="actions_destructive">Destructive actions</string>
+    <string name="actions_destructive_off">Destructive actions stay blocked until an owner re-deploys the policy with --enable-destructive-actions. This app cannot enable them.</string>
+    <string name="actions_dispatchable">Dispatchable routes</string>
+    <string name="actions_catalog">Catalog</string>
+    <string name="actions_unavailable">Unavailable</string>
+    <string name="actions_params">Parameters (JSON object)</string>
+    <string name="actions_prepare">Prepare action</string>
+    <string name="actions_refresh">Refresh catalog and audit</string>
+    <string name="actions_confirm_title">Confirm this action</string>
+    <string name="actions_confirm_run">Run on the device</string>
+    <string name="actions_confirm_cancel">Discard</string>
+    <string name="actions_confirm_note">The device re-validates the route, the parameters, the gate, the rate limit and the boot id before it actuates anything. The confirm token is valid once, is kept in memory only, and is dropped when you discard.</string>
+    <string name="actions_route">Route</string>
+    <string name="actions_risk">Risk class</string>
+    <string name="actions_expires">Token expires</string>
+    <string name="actions_warnings">Warnings</string>
+    <string name="actions_status">Status</string>
+    <string name="actions_status_refresh">Refresh status</string>
+    <string name="actions_cancel">Cancel action</string>
+    <string name="actions_cancel_requested">Cancel requested</string>
+    <string name="actions_started">Started</string>
+    <string name="actions_finished">Finished</string>
+    <string name="actions_duration">Duration</string>
+    <string name="actions_error_code">errorCode</string>
+    <string name="actions_result">Result</string>
+    <string name="actions_action_id">Action id</string>
+    <string name="actions_state">State</string>
+    <string name="actions_audit">Audit trail</string>
+    <string name="actions_audit_load">Load audit page</string>
+    <string name="actions_audit_total">Rows on the device</string>
+    <string name="actions_audit_newest_first">Newest first. A refused action appears with its errorCode; an actuation appears as execute, result, timeout or cancel.</string>
+    <string name="actions_notice_title">Action layer</string>
+    <string name="actions_empty">Nothing here yet.</string>
+
+    <!-- About -->
+    <string name="about_title">About and security</string>
+    <string name="about_body">E64 Local is a cloud-free, LAN-only owner app for the Mahlkönig E64 WS / NG2 grinder.\n\nIt has no account, no telemetry, no crash reporting, no analytics and no vendor cloud. The app contacts exactly one host: the device you enter on the setup screen.\n\nEverything it shows comes from the Local Owner API on a development image of your grinder. The action layer is closed by default: it answers 403 until an owner deploys a policy with e64root, and its destructive routes stay blocked until a second flag is deployed as well.</string>
+    <string name="about_actions_title">The action layer</string>
+    <string name="about_actions_body">The five action routes are prepare, execute, status, cancel and audit. Prepare validates the route, the parameters, the bounds and the machine state and returns a single-use confirm token.\n\nThe token is held in memory only: it is not written to storage, it is not part of any screen state, and it is never logged. Execute sends it back once. When you discard the dialog the token is dropped and nothing runs.\n\nA destructive route cannot be submitted while the device reports destructiveEnabled: false. The app has no override, and the device checks the same flag again before it actuates.</string>
+    <string name="about_token_title">The owner token</string>
+    <string name="about_token_body">The app talks to the device with two credentials:\n\n1. The vendor session cookie, obtained from the device\'s own login.\n2. An owner token, created by the setup step and written to /db/e64local/token on the device (mode 0600, owner www-data).\n\nThe token is 32 random bytes generated on your phone. It is stored encrypted with a key that never leaves the Android Keystore, and it is never logged. There is no recovery path: if it is lost, run the setup again to rotate it.</string>
+    <string name="about_tls_title">TLS</string>
+    <string name="about_tls_body">The device uses a self-signed certificate. Verification is never silently disabled: you are shown the certificate fingerprint and must accept it explicitly before the app stores a pin. Only the pinned certificate is accepted afterwards.</string>
+    <string name="about_devmode_title">Development mode required</string>
+    <string name="about_devmode_body">The module only answers when the image is a development build (the first word of /etc/issue is \"development\"). On a production image the module returns 403 and installing it does not change that.</string>
+    <string name="about_esp_title">What the app never does</string>
+    <string name="about_esp_body">The setup step writes four things: the API module, the root-owned action runner, its token directory and the owner token. It never touches the ESP co-processor, ESP flash or NVS, the bootloader, the eFuse, or any firmware image, and it never uploads firmware. The action layer stays disabled until an owner deploys a policy with e64root; the app can call the five action routes but cannot enable them, and it never reaches the ESP, the bootloader, the eFuse or a firmware image through them.</string>
+
+    <string name="generic_ok">OK</string>
+    <string name="generic_error">Error</string>
+    <string name="generic_retry">Retry</string>
+    <string name="generic_copy">Copy</string>
+</resources>

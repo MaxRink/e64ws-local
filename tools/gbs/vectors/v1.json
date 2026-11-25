@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "firmware_build": "HEM-HSG-HMI-S01 V01.16-24",
+  "algorithm": "GbS1",
+  "vectors": [
+    {
+      "id": "v1/fresh-age-tagged-trace",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:117-139 (age-tagged four-record median, 0.2/0.16 quantizer); docs/GBS_ALGORITHMS.md:280-287 supplies the correction and quantizer arithmetic.",
+      "algorithm": "GbS1",
+      "calls": [
+        {
+          "actualMs": 35000,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        },
+        {
+          "actualMs": 28000,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        },
+        {
+          "actualMs": 31000,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        },
+        {
+          "actualMs": 29500,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        },
+        {
+          "actualMs": 22000,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "adjust",
+          "central": 35.0,
+          "correction": 5.0,
+          "candidateDdDum": 60,
+          "returnedDdDum": 60,
+          "committed": true
+        },
+        {
+          "phase": "adjust",
+          "central": 35.0,
+          "correction": 5.0,
+          "candidateDdDum": 110,
+          "returnedDdDum": 110,
+          "committed": true
+        },
+        {
+          "phase": "adjust",
+          "central": 33.0,
+          "correction": 5.0,
+          "candidateDdDum": 160,
+          "returnedDdDum": 160,
+          "committed": true
+        },
+        {
+          "phase": "within-error-window",
+          "central": 30.25,
+          "correction": 0.0,
+          "candidateDdDum": 160,
+          "returnedDdDum": 160,
+          "committed": true
+        },
+        {
+          "phase": "adjust",
+          "central": 28.75,
+          "correction": -3.307519,
+          "candidateDdDum": 126,
+          "returnedDdDum": 126,
+          "committed": true
+        }
+      ],
+      "comment": "Fresh state (state=1.0, no prior output, tolerance 0 so every call commits). The 1.0 start is the documented lower clamp used by the host model; the recovered constructor/restore value is not independently proven, so this vector proves port agreement on that initialization, not the firmware's first-run value. central is (records[1]+records[2])/2 after sorting. The first record is replicated four times with ages 0..3, so a single sample is its own median. Call 3 shows the age rule: the 30 s record survives (age 2) while the new 31 s sample arrives, giving (31+35)/2 = 33.0; the 30 s copy is dropped on the next call. Call 4 has 0.25 s of central error and takes the inclusive 0.5 s deadband, keeping the 160 Dum output. Call 5 keeps a 28 s record and drops 35/30, giving (28+29.5)/2 = 28.75 and a -3.307519 correction, which quantizes to 12.6 um -> 126 Dum. State accumulates: 1 -> 6 -> 11 -> 16 -> 16 -> 12.692481 (call 4 is inside the deadband and leaves the state unchanged).",
+      "knownDefects": {
+        "js": "plugin.js increments record ages before testing `age === 3`, so the record that was already 3 becomes 4 and is never evicted, while the record that was 2 is removed instead. After the five calls the container still has four records with ages 0,1,2,7. Fix: remove the age-3 record before incrementing (as tools/gbs_model.py does), or test `age > 3` after incrementing. A post-increment `age >= 3` test is not equivalent: it would also drop the age-2 sample and shrink the window to three records."
+      }
+    },
+    {
+      "id": "v1/tolerance-equality-commits",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:139-143 and docs/GBS_ALGORITHMS.md:289-292: the commit gate is strict `abs(actualMs-targetMs) < abs(toleranceMs)`, so equality falls through to the commit.",
+      "algorithm": "GbS1",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 29500,
+          "toleranceMs": 500,
+          "estimatedDdDum": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "within-error-window",
+          "central": 30.0,
+          "correction": 0.0,
+          "candidateDdDum": 10,
+          "returnedDdDum": 10,
+          "committed": true
+        }
+      ],
+      "comment": "|30000-29500| == 500, so the strict hold does not apply. The deadband output 10 is committed, not the estimate 1000. With no prior quantized output, the candidate is the host fallback round(state/0.2)*0.2 = 10; the firmware's NaN-initialization path is not proven. A caller that used `<=` would return 1000 here and fail this vector.",
+      "postState": {
+        "records": [
+          [
+            30.0,
+            0
+          ],
+          [
+            30.0,
+            1
+          ],
+          [
+            30.0,
+            2
+          ],
+          [
+            30.0,
+            3
+          ]
+        ],
+        "state": 1.0,
+        "outputTenths": 10
+      }
+    },
+    {
+      "id": "v1/hold-strictly-inside-tolerance",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:289-292: the same call with a wider tolerance must hold the estimate.",
+      "algorithm": "GbS1",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 29500,
+          "toleranceMs": 600,
+          "estimatedDdDum": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "within-error-window",
+          "central": 30.0,
+          "correction": 0.0,
+          "candidateDdDum": 10,
+          "returnedDdDum": 1000,
+          "committed": false
+        }
+      ],
+      "comment": "Same inputs as v1/tolerance-equality-commits with tolerance 600. 500 < 600, so the estimate 1000 is returned while the candidate 10 is still computed; the candidate fallback is the host policy noted there. The pair pins the strict inequality from both sides."
+    },
+    {
+      "id": "v1/documented-worked-example",
+      "provenance": "V",
+      "source": "docs/GBS_ALGORITHMS.md:274-292 (worked example: central 20 s, target 25 s, state 10 um, previous 100 Dum -> correction -5.0, state 5.0, 50 Dum).",
+      "function": "v1_adjust",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The plugin exposes only the full gbsAdjust path; its central value comes from its own age-tagged history and cannot be injected, so the doc's hand-set central=20/state=10/previous=100 state is not reachable through the public surface."
+      },
+      "cases": [
+        {
+          "central": 20.0,
+          "observation": 25.0,
+          "previousState": 10.0,
+          "previousOutputTenths": 100,
+          "expected": {
+            "phase": "adjust",
+            "central": 20.0,
+            "correction": -5.0,
+            "candidateDdDum": 50
+          }
+        }
+      ],
+      "comment": "Direct documentation anchor: raw = -((32768/15^3)+0.2)*(25-20) = -49.5452 um, clamped to -5.0; state 5.0; round(5.0/0.2)*0.2 = 5.0; round(5.0*10) = 50 Dum. Kept as a function case because the doc's inputs are intermediate state, not a fresh session."
+    },
+    {
+      "id": "v1/quantizer-0.16-inclusive-hold",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:127-139 and tests/test_local_clients.py:596-600: the hysteresis band is 0.8*0.2 = 0.16 and both edges retain the old value.",
+      "function": "hysteretic_quantize",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The shipped plugin does not export the V1 quantizer; its gbsAdjust path exercises it indirectly, so a direct function vector cannot call the plugin."
+      },
+      "cases": [
+        {
+          "value": 10.16,
+          "previousOutputTenths": 100,
+          "expected": 10.0
+        },
+        {
+          "value": 10.160234,
+          "previousOutputTenths": 100,
+          "expected": 10.2
+        },
+        {
+          "value": 9.84,
+          "previousOutputTenths": 100,
+          "expected": 10.0
+        },
+        {
+          "value": 9.839766,
+          "previousOutputTenths": 100,
+          "expected": 9.8
+        },
+        {
+          "value": 10.1,
+          "previousOutputTenths": null,
+          "expected": 10.0
+        },
+        {
+          "value": 10.3,
+          "previousOutputTenths": null,
+          "expected": 10.4
+        }
+      ],
+      "comment": "Pure quantizer cases. 10.16 and 9.84 are the inclusive band edges. 10.160234 is far enough above the edge that binary 0.2 spacing cannot round it back. The no-previous case uses C round(value/0.2)*0.2; 10.1/0.2 is a binary value just below 50.5, so the result is 10.0, not 10.2."
+    },
+    {
+      "id": "v1/signed-cxx-rounding",
+      "provenance": "S",
+      "source": "src/recovered/gbs_algorithms.cpp:35-39 (round away from zero at half-way) and docs/GBS_ALGORITHMS.md:285-286,310.",
+      "function": "cxx_round",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The shipped plugin does not export its C-round helper; its gbsAdjust path exercises it indirectly, so a direct function vector cannot call the plugin."
+      },
+      "cases": [
+        {
+          "value": 2.5,
+          "expected": 3
+        },
+        {
+          "value": -2.5,
+          "expected": -3
+        },
+        {
+          "value": 1.25,
+          "expected": 1
+        },
+        {
+          "value": -1.25,
+          "expected": -1
+        }
+      ],
+      "comment": "Caller-level rounding contract shared by every algorithm. Kept separate from output_tenths so the scaling multiply is not confused with the rounding rule."
+    },
+    {
+      "id": "v1/singular-central-5s-policy-divergence",
+      "provenance": "I",
+      "source": "docs/GBS_PARITY_REVIEW.md:GBS-P03 and docs/GBS_ALGORITHMS.md:117-139: the cubic correction divides by (central-5)^3, so central == 5.0 is singular.",
+      "algorithm": "GbS1",
+      "calls": [
+        {
+          "actualMs": 5000,
+          "targetMs": 30000,
+          "toleranceMs": 0,
+          "estimatedDdDum": 1000
+        }
+      ],
+      "divergences": {
+        "python": {
+          "policy": "Strict reference model: reject the singular correction instead of emulating IEEE divide-by-zero and the downstream quantizer.",
+          "expectedError": "ValueError"
+        },
+        "js": {
+          "policy": "UI port: return a synthetic singular-central result with null candidate instead of propagating an exception.",
+          "expected": [
+            {
+              "phase": "singular-central",
+              "central": 5.0,
+              "correction": null,
+              "candidateDdDum": null,
+              "returnedDdDum": null,
+              "committed": false
+            }
+          ]
+        }
+      },
+      "comment": "Deliberate policy divergence, not parity. A fresh V1 history is four copies of the first sample, so a 5 s actual brew makes central exactly 5.0 on the first call and the denominator (5-5)^3 is zero. Python's v1_adjust raises; the plugin returns phase singular-central with null values and does not commit. Both behaviours are asserted here so a future change to either policy is visible."
+    }
+  ]
+}

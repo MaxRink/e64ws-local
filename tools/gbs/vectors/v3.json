@@ -1,0 +1,377 @@
+{
+  "schema": 1,
+  "firmware_build": "HEM-HSG-HMI-S01 V01.16-24",
+  "algorithm": "GbS3",
+  "vectors": [
+    {
+      "id": "v3/fresh-phase-ladder",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:186-231 and docs/GBS_ALGORITHMS.md:318-337 (near/mid/far thresholds, hold countdown, DD x brew filter), hand-derived from fresh V3 defaults.",
+      "algorithm": "GbS3",
+      "calls": [
+        {
+          "actualMs": 35000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 34000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 28500,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 28000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1250,
+          "returnedDdDum": 1250,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1020,
+          "returnedDdDum": 1020,
+          "committed": true
+        },
+        {
+          "phase": "mid",
+          "candidateDdDum": 1083,
+          "returnedDdDum": 1083,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1012,
+          "returnedDdDum": 1083,
+          "committed": false
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1009,
+          "returnedDdDum": 1083,
+          "committed": false
+        }
+      ],
+      "comment": "Fresh V3 starts with hold_cycles_remaining=2, so calls 1-2 consume the countdown and are labelled near despite the large error; the filtered DD x brew value is 100 um * 35 s = 3500, so the near candidate is 125.0 um. Call 3 has error exactly 2.0 s and only two history points, so the learned-near guard (len > 2) fails and error <= 5.0 selects mid with factor 0.5. Calls 4-5 pass the near guard and reload the countdown; their 0.5 s and 0 s errors are inside the 1000 ms tolerance, so they hold 1083 rather than committing 1012/1009.",
+      "postState": {
+        "history": [
+          [
+            100,
+            35
+          ],
+          [
+            100,
+            34
+          ],
+          [
+            100,
+            30
+          ],
+          [
+            100,
+            28.5
+          ],
+          [
+            100,
+            28
+          ]
+        ],
+        "farFactor": 0.0,
+        "midFactor": 0.5,
+        "nearFactor": 1.0,
+        "filterRetention": 0.5,
+        "holdCyclesSetting": 2,
+        "holdCyclesRemaining": 2,
+        "lastTargetDum": 1000,
+        "lastAdjustmentDum": 1083,
+        "filteredDdTimesBrew": 2918.75,
+        "nearThreshold": 2.0,
+        "keepMediumInterval": false
+      }
+    },
+    {
+      "id": "v3/documented-mid-at-5s-boundary",
+      "provenance": "V",
+      "source": "docs/GBS_ALGORITHMS.md:318-331 (worked example: 20 s actual vs 25 s target, mid at the inclusive 5.0 s far boundary, midFactor 0.0 -> 400 Dum); tests/test_local_clients.py:396-405,616-628.",
+      "algorithm": "GbS3",
+      "implementations": [
+        "python"
+      ],
+      "preState": {
+        "v3": {
+          "history": [],
+          "filteredDdTimesBrew": null,
+          "hold_cyclesRemaining": 0,
+          "mid_factor": 0.0
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 20000,
+          "targetMs": 25000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 600,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "mid",
+          "candidateDdDum": 400,
+          "returnedDdDum": 400,
+          "committed": true
+        }
+      ],
+      "comment": "The doc example needs hold_cycles_remaining=0 and mid_factor=0.0, which are restored state rather than fresh defaults. The shipped plugin cannot inject V3 state, so this vector is Python-only. Arithmetic: estimated 50 um * 20 s = 1000, hyperbolic 1000/25 = 40 um, one appended point so linear == hyperbolic, mid factor 0 -> 40 um -> 400 Dum. The exact 5.0 s error proves the inclusive far boundary: 5.0 <= 5.0 is mid, not far.",
+      "capabilityGaps": {
+        "js": "The plugin cannot inject V3 history, hold countdown, or midFactor; it always starts from its constructor defaults, so restored-state arithmetic is not reachable."
+      }
+    },
+    {
+      "id": "v3/near-threshold-inclusive-with-three-samples",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:192-199 and docs/GBS_ALGORITHMS.md:333-335 (inclusive near comparison, >2 pre-existing samples, countdown reload to 2).",
+      "algorithm": "GbS3",
+      "implementations": [
+        "python"
+      ],
+      "preState": {
+        "v3": {
+          "history": [
+            [
+              50.0,
+              27.0
+            ],
+            [
+              49.0,
+              28.0
+            ],
+            [
+              48.0,
+              29.0
+            ]
+          ],
+          "filteredDdTimesBrew": 1500.0,
+          "hold_cyclesRemaining": 0,
+          "lastTargetDum": 500,
+          "lastAdjustmentDum": 500,
+          "mid_factor": 0.0
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 23000,
+          "targetMs": 25000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 31000,
+          "targetMs": 25000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 501,
+          "returnedDdDum": 501,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 512,
+          "returnedDdDum": 512,
+          "committed": true
+        }
+      ],
+      "comment": "Call 1 has error exactly 2.0 s and three pre-existing points, so the inclusive near comparison fires and reloads the countdown to 2. The filter blends 1500 with effective 50 um * 23 s = 1150: 1325, hyperbolic 1325/25 = 53 um; the four-point prediction gives a blended linear value of 50.052 um, and the near factor 1.0 selects that linear value -> 501. Call 2 has a 6.0 s error, so it cannot take the learned-near branch; the reloaded countdown makes it a hold-driven near (consume one cycle, 1 left). The filtered DD x brew is 1437.5 (hyperbolic 57.5), but the near factor 1.0 again selects the linear blend, 51.2 um -> 512. Both need restored V3 state, hence Python-only.",
+      "capabilityGaps": {
+        "js": "The plugin cannot inject V3 history, filter value, or last target/adjustment; the near-threshold branch is only reachable after its own call history reaches three samples, which tests a different sequence."
+      }
+    },
+    {
+      "id": "v3/dd-change-500-does-not-cancel",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:186-187 (`abs(dd_change) > 500`) and docs/GBS_PARITY_REVIEW.md:GBS-P07 (500 does not cancel, 501 does).",
+      "algorithm": "GbS3",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1500,
+          "setpointDdDum": 1500,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 2000,
+          "setpointDdDum": 2000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 2501,
+          "setpointDdDum": 2501,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1071,
+          "returnedDdDum": 1071,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1374,
+          "returnedDdDum": 1374,
+          "committed": true
+        },
+        {
+          "phase": "mid",
+          "candidateDdDum": 1733,
+          "returnedDdDum": 1733,
+          "committed": true
+        },
+        {
+          "phase": "cancel",
+          "candidateDdDum": 1733,
+          "returnedDdDum": 1733,
+          "committed": false,
+          "locked": true
+        }
+      ],
+      "comment": "Each call moves the estimated DD by exactly 500 from the stored target (1000 -> 1500 -> 2000), which does not satisfy the strict `> 500` guard, so all three adjust normally: 1071, 1374, 1733. Call 4 moves to 2501, exactly 501 above 2000, and the strict guard fires, returning the previous adjustment 1733 before the filter/history calculation. This vector does not assert the cancel-path post-state."
+    },
+    {
+      "id": "v3/dd-change-501-cancels",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:186-187 and docs/GBS_PARITY_REVIEW.md:GBS-P07 (``abs(estimated - lastTarget) == 501`` cancels and returns the previous adjustment).",
+      "algorithm": "GbS3",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1501,
+          "setpointDdDum": 1501,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1071,
+          "returnedDdDum": 1071,
+          "committed": true
+        },
+        {
+          "phase": "cancel",
+          "candidateDdDum": 1071,
+          "returnedDdDum": 1071,
+          "committed": false,
+          "locked": true
+        }
+      ],
+      "comment": "Call 1 stores lastTarget=1000 and commits 1071. Call 2's estimated DD is 1501, so |1501-1000| = 501 > 500 and the cancel branch returns the previous adjustment. The neighbouring 500 vector proves the boundary from the other side."
+    },
+    {
+      "id": "v3/far-clears-history",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:198-199 (far clears history before calculating and does not append the far sample); docs/GBS_ALGORITHMS.md:335-337.",
+      "algorithm": "GbS3",
+      "calls": [
+        {
+          "actualMs": 40000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 40000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 40000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1429,
+          "returnedDdDum": 1429,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1036,
+          "returnedDdDum": 1036,
+          "committed": true
+        },
+        {
+          "phase": "far",
+          "candidateDdDum": 1429,
+          "returnedDdDum": 1429,
+          "committed": true
+        }
+      ],
+      "postState": {
+        "history": []
+      },
+      "comment": "The 12 s error is far above the 5 s threshold, but the first two calls are consumed by the fresh hold countdown (2 -> 1 -> 0) and are labelled near. Call 3 has no hold left, so error > 5.0 selects far and the post-state asserts the history is empty, proving the clear and that the far sample is not appended. The far factor is 0.0, so the returned 1429 (filtered 4000/28 = 142.9 um) is the hyperbolic value; because the effective DD is constant across these calls, the result alone cannot distinguish a retained filter from a reset one. The fresh ladder covers filter retention separately."
+    }
+  ]
+}

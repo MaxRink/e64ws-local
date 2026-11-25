@@ -1,0 +1,11 @@
+# Machine-local build configuration. Never committed.
+local.properties
+
+# Gradle and Android build output.
+.gradle/
+build/
+.cxx/
+captures/
+*.apk
+*.aab
+*.hprof

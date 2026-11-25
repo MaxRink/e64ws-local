@@ -1,0 +1,39 @@
+name: Firmware LFS/hash check
+
+on:
+  push:
+    paths:
+      - 'firmware/**'
+      - '.gitignore'
+      - '.github/workflows/firmware.yml'
+      - 'tools/check_firmware.py'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - '.gitignore'
+      - '.github/workflows/firmware.yml'
+      - 'tools/check_firmware.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with Git LFS
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      # SHA256SUMS lists bare filenames, so it only resolves from firmware/.
+      # No quoting is needed for the one name containing a space: both GNU
+      # sha256sum and shasum read an unescaped space correctly.  --strict also
+      # rejects malformed lines instead of ignoring them.
+      - name: Verify SHA256SUMS against the checked-out bytes
+        working-directory: firmware
+        run: sha256sum --check --strict SHA256SUMS
+
+      - name: Verify firmware LFS pointers and manifest hashes
+        run: python3 tools/check_firmware.py

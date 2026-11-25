@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# Reproducible rebuild of the Ng2EspApp (Project NG2) ESP32 co-processor image.
+#
+# Reproduces:
+#   * the 2nd-stage bootloader  -> ~91.8% byte-identical (all strings identical)
+#   * the application           -> ~65.9% byte-identical to upstream+config
+#
+# The remainder is vendor-proprietary code (see REPORT.md §9).
+#
+# Requirements: docker, git, curl.  No network access to the target device.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${ROOT:-$SCRIPT_DIR}"
+IDF_IMAGE="${IDF_IMAGE:-espressif/idf:v5.0}"        # ESP-IDF v5.0.0, gcc 11.2.0 esp-2022r1
+ESP_HOSTED_REF="${ESP_HOSTED_REF:-release/ng-v1.0.2}"
+PROTOBUF_C_REF="${PROTOBUF_C_REF:-v1.4.1}"
+SOURCE_DATE_EPOCH_APP="${SOURCE_DATE_EPOCH_APP:-1780667865}"   # 2026-06-05 13:57:45 UTC
+SOURCE_DATE_EPOCH_BL="${SOURCE_DATE_EPOCH_BL:-1780667868}"     # 2026-06-05 13:57:48 UTC
+
+mkdir -p "$ROOT"/{build,images,segments,strings,logs,evidence}
+cd "$ROOT"
+
+# ---------------------------------------------------------------- partition table
+# Recovered from app-tree/esp/partition-table.bin
+read -r -d '' PARTITIONS <<'EOF' || true
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x4000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 0x200000,
+spiflash, data, fat,     0x210000,0x100000,
+EOF
+
+# ---------------------------------------------------------------- bootloader
+build_bootloader() {
+  local d="$ROOT/build/bl"
+  rm -rf "$d"; mkdir -p "$d/main"
+  cat > "$d/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(ng2esp_bootloader)
+EOF
+  cat > "$d/main/CMakeLists.txt" <<'EOF'
+idf_component_register(SRCS "main.c")
+EOF
+  echo 'void app_main(void) {}' > "$d/main/main.c"
+  printf '%s\n' "$PARTITIONS" > "$d/partitions.csv"
+  cat > "$d/sdkconfig.defaults" <<'EOF'
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+EOF
+  echo "== building bootloader (IDF v5.0.0) =="
+  docker run --rm -v "$d":/project -w /project \
+      -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH_BL" "$IDF_IMAGE" bash -lc \
+      'rm -rf /opt/esp/idf/.git; idf.py build' > "$ROOT/logs/build_bootloader.log" 2>&1 \
+      || { echo "BOOTLOADER BUILD FAILED"; grep -E 'error:|FAILED' "$ROOT/logs/build_bootloader.log" | head -20; exit 1; }
+  tail -3 "$ROOT/logs/build_bootloader.log"
+  cp "$d/build/bootloader/bootloader.bin" "$ROOT/images/rebuilt-bootloader.bin"
+}
+
+# ---------------------------------------------------------------- application
+build_app() {
+  local d="$ROOT/build/hosted"
+  rm -rf "$d"; mkdir -p "$d/main"
+
+  if [ ! -d "$ROOT/esp-hosted/.git" ]; then
+    git clone -q https://github.com/espressif/esp-hosted.git "$ROOT/esp-hosted"
+  fi
+  (
+    cd "$ROOT/esp-hosted"
+    git archive "$ESP_HOSTED_REF" \
+        esp_hosted_fg/esp/esp_driver/network_adapter/main \
+        esp_hosted_fg/common/esp_hosted_config.pb-c.c \
+        esp_hosted_fg/common/include | tar -x -C "$d"
+    cp "$d"/esp_hosted_fg/esp/esp_driver/network_adapter/main/* "$d/main/"
+    cp "$d"/esp_hosted_fg/common/esp_hosted_config.pb-c.c "$d/main/"
+    mkdir -p "$d/main/include"
+    cp "$d"/esp_hosted_fg/common/include/* "$d/main/include/"
+    rm -rf "$d/esp_hosted_fg"
+  )
+
+  cat > "$d/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(network_adapter)
+EOF
+
+  cat > "$d/main/CMakeLists.txt" <<'EOF'
+set(srcs "slave_control.c" "esp_hosted_config.pb-c.c" "protocomm_pserial.c"
+         "app_main.c" "mempool.c" "stats.c" "vendor_stub.c")
+if(CONFIG_ESP_SDIO_HOST_INTERFACE)
+    list(APPEND srcs "sdio_slave_api.c")
+else()
+    list(APPEND srcs "spi_slave_api.c")
+endif()
+idf_component_register(SRCS ${srcs} INCLUDE_DIRS "." "include")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    -DPROJECT_VERSION_MAJOR_1=0 -DPROJECT_VERSION_MAJOR_2=0 -DPROJECT_VERSION_MINOR=5)
+idf_component_get_property(protocomm_dir protocomm COMPONENT_DIR)
+target_include_directories(${COMPONENT_LIB} PRIVATE "${protocomm_dir}/src/common")
+EOF
+
+  # protobuf-c as an IDF component (vendor kept it under Application/NetworkAdapter/Protobuff)
+  if [ ! -d "$d/components/protobuf-c/.git" ]; then
+    mkdir -p "$d/components"
+    git clone -q --depth 1 --branch "$PROTOBUF_C_REF" \
+        https://github.com/protobuf-c/protobuf-c.git "$d/components/protobuf-c"
+  fi
+  cat > "$d/components/protobuf-c/CMakeLists.txt" <<'EOF'
+idf_component_register(SRCS "protobuf-c/protobuf-c.c" INCLUDE_DIRS ".")
+EOF
+
+  printf '%s\n' "$PARTITIONS" > "$d/partitions.csv"
+
+  # sdkconfig recovered in REPORT.md §6
+  cat > "$d/sdkconfig.defaults" <<'EOF'
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESP_SDIO_HOST_INTERFACE=y
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_FREERTOS_HZ=400
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_BT_ENABLED=n
+CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER=y
+CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_ESP32_WIFI_NVS_ENABLED=n
+EOF
+
+  # Vendor-equivalent stubs: the IDF drivers that strings prove are linked in
+  # (RMT/WS2812, esp_partition, GPIO ISR service, esp_timer).  app_main() calls
+  # vendor_stub_led() once so --gc-sections keeps them.
+  cat > "$d/main/vendor_stub.c" <<'EOF'
+#include <string.h>
+#include "esp_attr.h"
+#include "esp_log.h"
+#include "driver/rmt_tx.h"
+#include "driver/gpio.h"
+#include "esp_partition.h"
+#include "esp_timer.h"
+
+static const char *TAG = "VENDOR_STUB";
+
+void vendor_stub_led(void)
+{
+    rmt_tx_channel_config_t tx_cfg = {
+        .gpio_num = 4, .clk_src = RMT_CLK_SRC_DEFAULT, .resolution_hz = 10000000,
+        .mem_block_symbols = 64, .trans_queue_depth = 4,
+    };
+    rmt_channel_handle_t chan = NULL;
+    if (rmt_new_tx_channel(&tx_cfg, &chan) != ESP_OK) { ESP_LOGE(TAG, "init error %s", "chan"); return; }
+    rmt_bytes_encoder_config_t enc_cfg = {0};
+    enc_cfg.bit0.level0 = 1; enc_cfg.bit0.duration0 = 3; enc_cfg.bit0.level1 = 0; enc_cfg.bit0.duration1 = 9;
+    enc_cfg.bit1.level0 = 1; enc_cfg.bit1.duration0 = 9; enc_cfg.bit1.level1 = 0; enc_cfg.bit1.duration1 = 3;
+    enc_cfg.flags.msb_first = 1;
+    rmt_encoder_handle_t enc = NULL;
+    if (rmt_new_bytes_encoder(&enc_cfg, &enc) != ESP_OK) { ESP_LOGE(TAG, "Error Coder: %s", "enc"); return; }
+    rmt_enable(chan);
+    uint8_t px[3] = {0, 0, 0};
+    rmt_transmit_config_t txc = { .loop_count = 0 };
+    rmt_transmit(chan, enc, px, sizeof(px), &txc);
+    rmt_tx_wait_all_done(chan, 100);
+}
+
+void vendor_stub_part(void)
+{
+    const esp_partition_t *p = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "spiflash");
+    if (p) { uint8_t b[16]; esp_partition_read(p, 0, b, sizeof(b)); }
+}
+
+static void IRAM_ATTR stub_isr(void *arg) { (void)arg; }
+
+void vendor_stub_gpio(void)
+{
+    gpio_config_t io = { .pin_bit_mask = 1ULL << 0, .mode = GPIO_MODE_INPUT, .intr_type = GPIO_INTR_ANYEDGE };
+    gpio_config(&io);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(0, stub_isr, NULL);
+}
+
+static void stub_timer_cb(void *arg) { (void)arg; }
+void vendor_stub_timer(void)
+{
+    esp_timer_handle_t t;
+    esp_timer_create_args_t a = { .callback = stub_timer_cb, .name = "Timer" };
+    esp_timer_create(&a, &t);
+    esp_timer_start_once(t, 1000000);
+}
+
+/* Keep all four stubs (and the IDF drivers they use) linked in: a constructor
+ * is retained via .init_array, so referencing them here survives --gc-sections. */
+static void vendor_stub_ref(void)
+{
+    static void (*volatile const keep[])(void) = {
+        vendor_stub_led, vendor_stub_part, vendor_stub_gpio, vendor_stub_timer,
+    };
+    (void)keep[0];
+}
+__attribute__((constructor)) static void vendor_stub_ctor(void) { vendor_stub_ref(); }
+EOF
+
+  # single call site so the stub survives --gc-sections
+  python3 - "$d/main/app_main.c" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "void app_main()\n{\n\tesp_err_t ret;"
+new = "extern void vendor_stub_led(void);\nvoid app_main()\n{\n\tvendor_stub_led();\n\tesp_err_t ret;"
+assert old in s, "app_main.c layout changed"
+open(p, "w").write(s.replace(old, new, 1))
+PY
+
+  echo "== building application (IDF v5.0.0 + esp-hosted $ESP_HOSTED_REF) =="
+  docker run --rm -v "$d":/project -w /project \
+      -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH_APP" "$IDF_IMAGE" bash -lc \
+      'rm -rf /opt/esp/idf/.git; idf.py build' > "$ROOT/logs/build_app.log" 2>&1 \
+      || { echo "APP BUILD FAILED"; grep -E 'error:|FAILED' "$ROOT/logs/build_app.log" | head -20; exit 1; }
+  tail -3 "$ROOT/logs/build_app.log"
+
+  cp "$d/build/network_adapter.bin" "$ROOT/images/rebuilt-Ng2EspApp.bin"
+  # the app project also builds a bootloader, but with the *app* timestamp;
+  # keep it separate so it does not clobber the dedicated bootloader build
+  cp "$d/build/bootloader/bootloader.bin" "$ROOT/images/rebuilt-appproject-bootloader.bin"
+  echo "   -> $ROOT/images/rebuilt-Ng2EspApp.bin"
+  echo "   -> $ROOT/images/rebuilt-appproject-bootloader.bin"
+}
+
+case "${1:-all}" in
+  bl|bootloader) build_bootloader ;;
+  app)           build_app ;;
+  all)           build_bootloader; build_app ;;
+  *) echo "usage: $0 [bl|app|all]"; exit 2 ;;
+esac
+
+echo
+echo "== diff =="
+[ -f "$ROOT/images/rebuilt-bootloader.bin" ] && \
+  python3 "$SCRIPT_DIR/tools/rundiff.py" "$SCRIPT_DIR/images/1.16-24-bootloader.bin" \
+          "$ROOT/images/rebuilt-bootloader.bin" -w 16 --top 5
+[ -f "$ROOT/images/rebuilt-Ng2EspApp.bin" ] && \
+  python3 "$SCRIPT_DIR/tools/segdiff.py" "$SCRIPT_DIR/images/1.16-24-Ng2EspApp.bin" \
+          "$ROOT/images/rebuilt-Ng2EspApp.bin"

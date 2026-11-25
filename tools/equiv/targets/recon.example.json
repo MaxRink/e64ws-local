@@ -1,0 +1,33 @@
+{
+  "name": "recon",
+  "kind": "direct",
+  "description": "EXAMPLE: a reconstructed HMI. Copy to targets/recon.json and edit the URLs/adapters. The harness only uses these fields; nothing about the reconstruction's internals is assumed.",
+  "http": "http://127.0.0.1:48082",
+  "https": "https://127.0.0.1:48443",
+  "wss": "wss://127.0.0.1:49997",
+  "timeout": 30,
+  "shell": {
+    "argv": ["ssh", "-o", "StrictHostKeyChecking=no", "-p", "43222", "root@127.0.0.1"]
+  },
+  "state": {
+    "argv": ["ssh", "-o", "StrictHostKeyChecking=no", "-p", "43222", "root@127.0.0.1", "/opt/recon/bin/state-json"]
+  },
+  "mint_token": {
+    "argv": ["ssh", "-o", "StrictHostKeyChecking=no", "-p", "43222", "root@127.0.0.1", "/opt/recon/bin/mint-token"]
+  },
+  "reset": {
+    "argv": ["/opt/recon/bin/reset-state"]
+  },
+  "power": {
+    "argv": ["/opt/recon/bin/power"]
+  },
+  "esp_event": {
+    "argv": ["/opt/recon/bin/esp-event"]
+  },
+  "notes": [
+    "mint_token must print a 64-hex token on stdout and make it valid for the target's WSS validator.",
+    "state must print a JSON object with the same shape as `vg state` for the fields scenarios select (guest.leds, guest.backlight, esp.requests, espjson.*).",
+    "shell receives the command on stdin and must print stdout, exit 0.",
+    "If the reconstruction cannot expose a shell, drop the keys that need it: scenarios 02, 03 (sysfs), 04 (db), 05 (files), 06 (EspWifiConfig) and 08 will record 'target has no shell adapter' instead of failing."
+  ]
+}

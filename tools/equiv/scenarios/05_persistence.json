@@ -1,0 +1,166 @@
+{
+  "id": "05_persistence",
+  "title": "State persistence across an HMI restart: config, setup wizard, counters, database",
+  "profile": "dev",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "p01",
+      "op": "mark",
+      "label": "pre-restart baseline"
+    },
+    {
+      "id": "p02",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 1
+    },
+    {
+      "id": "p03",
+      "op": "shell",
+      "cmd": "cat /proc/sys/kernel/random/boot_id"
+    },
+    {
+      "id": "p04",
+      "op": "db",
+      "sql": "select key,value from settings where key like 'System.%' or key like 'Role.%' order by key"
+    },
+    {
+      "id": "p05",
+      "op": "mark",
+      "label": "mutations that must survive a restart"
+    },
+    {
+      "id": "p06",
+      "op": "wss",
+      "action": "SetLanguage",
+      "msg_id": 10,
+      "data": {
+        "language": "de"
+      }
+    },
+    {
+      "id": "p07",
+      "op": "wss",
+      "action": "SetSetupWizardState",
+      "msg_id": 11,
+      "data": {
+        "state": "Completed"
+      }
+    },
+    {
+      "id": "p08",
+      "op": "wss",
+      "action": "SetBacklightBrightness",
+      "msg_id": 12,
+      "data": {
+        "brightness": 9
+      }
+    },
+    {
+      "id": "p09",
+      "op": "wss",
+      "action": "SetFan1Duty",
+      "msg_id": 13,
+      "data": {
+        "dutyPercent": 25
+      }
+    },
+    {
+      "id": "p10",
+      "op": "sleep",
+      "ms": 800
+    },
+    {
+      "id": "p11",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 14
+    },
+    {
+      "id": "p12",
+      "op": "shell",
+      "cmd": "grep -v '\"id\":' /db/HsgConfig.json | sha256sum"
+    },
+    {
+      "id": "p13",
+      "op": "shell",
+      "cmd": "echo brightness=$(cat /sys/class/backlight/backlight/brightness)"
+    },
+    {
+      "id": "p14",
+      "op": "mark",
+      "label": "restart"
+    },
+    {
+      "id": "p15",
+      "op": "reboot",
+      "action": "reboot",
+      "timeout_s": 240
+    },
+    {
+      "id": "p16",
+      "op": "sleep",
+      "ms": 3000
+    },
+    {
+      "id": "p17",
+      "op": "mark",
+      "label": "post-restart observations"
+    },
+    {
+      "id": "p18",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 20
+    },
+    {
+      "id": "p19",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.language",
+      "equals": "de"
+    },
+    {
+      "id": "p20",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.setupWizardState",
+      "equals": "Completed"
+    },
+    {
+      "id": "p21",
+      "op": "db",
+      "sql": "select key,value from settings where key like 'System.%' or key like 'Role.%' order by key"
+    },
+    {
+      "id": "p22",
+      "op": "shell",
+      "cmd": "grep -v '\"id\":' /db/HsgConfig.json | sha256sum"
+    },
+    {
+      "id": "p23",
+      "op": "shell",
+      "cmd": "echo brightness=$(cat /sys/class/backlight/backlight/brightness)"
+    },
+    {
+      "id": "p24",
+      "op": "shell",
+      "cmd": "ls -1 /db | sort | tr '\\n' ' '"
+    },
+    {
+      "id": "p25",
+      "op": "db",
+      "sql": "select count(*) as grind_rows from grind_log"
+    },
+    {
+      "id": "p26",
+      "op": "state",
+      "keep": [
+        "guest.leds",
+        "guest.backlight"
+      ]
+    }
+  ]
+}

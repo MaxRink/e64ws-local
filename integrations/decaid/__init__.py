@@ -1,0 +1,1 @@
+"""Decaid-facing reference adapter."""

@@ -1,0 +1,205 @@
+{
+  "id": "04_grind",
+  "title": "Grind command accept path and state polling (no load-cell stream in QEMU, so no Grinding transition)",
+  "profile": "dev",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "g01",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 1
+    },
+    {
+      "id": "g02",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.grindState",
+      "equals": "Idle"
+    },
+    {
+      "id": "g03",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "data.grindFailure",
+      "equals": "None"
+    },
+    {
+      "id": "g04",
+      "op": "mark",
+      "label": "weighted grind"
+    },
+    {
+      "id": "g05",
+      "op": "wss",
+      "action": "StartGrindGbw",
+      "msg_id": 10,
+      "data": {
+        "targetWeightGr": 18.0
+      }
+    },
+    {
+      "id": "g06",
+      "op": "wait",
+      "type": "RequestDriverState",
+      "path": "data.grindState",
+      "equals": "Grinding",
+      "timeout_s": 3,
+      "interval_s": 0.2
+    },
+    {
+      "id": "g07",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 11
+    },
+    {
+      "id": "g08",
+      "op": "sleep",
+      "ms": 1500
+    },
+    {
+      "id": "g09",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 12
+    },
+    {
+      "id": "g10",
+      "op": "wss",
+      "action": "Stop",
+      "msg_id": 13
+    },
+    {
+      "id": "g11",
+      "op": "wait",
+      "type": "RequestDriverState",
+      "path": "data.grindState",
+      "equals": "Idle",
+      "timeout_s": 5,
+      "interval_s": 0.2
+    },
+    {
+      "id": "g12",
+      "op": "mark",
+      "label": "timed grind"
+    },
+    {
+      "id": "g13",
+      "op": "wss",
+      "action": "StartGrindGbt",
+      "msg_id": 20,
+      "data": {
+        "grindTimeSec": 3
+      }
+    },
+    {
+      "id": "g14",
+      "op": "wait",
+      "type": "RequestDriverState",
+      "path": "data.grindState",
+      "equals": "Grinding",
+      "timeout_s": 3,
+      "interval_s": 0.2
+    },
+    {
+      "id": "g15",
+      "op": "sleep",
+      "ms": 800
+    },
+    {
+      "id": "g16",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 21
+    },
+    {
+      "id": "g17",
+      "op": "wss",
+      "action": "Stop",
+      "msg_id": 22
+    },
+    {
+      "id": "g18",
+      "op": "wait",
+      "type": "RequestDriverState",
+      "path": "data.grindState",
+      "equals": "Idle",
+      "timeout_s": 5,
+      "interval_s": 0.2
+    },
+    {
+      "id": "g19",
+      "op": "mark",
+      "label": "manual grind"
+    },
+    {
+      "id": "g20",
+      "op": "wss",
+      "action": "StartGrindManual",
+      "msg_id": 30
+    },
+    {
+      "id": "g21",
+      "op": "sleep",
+      "ms": 500
+    },
+    {
+      "id": "g22",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 31
+    },
+    {
+      "id": "g23",
+      "op": "wss",
+      "action": "Stop",
+      "msg_id": 32
+    },
+    {
+      "id": "g24",
+      "op": "wait",
+      "type": "RequestDriverState",
+      "path": "data.grindState",
+      "equals": "Idle",
+      "timeout_s": 5,
+      "interval_s": 0.2
+    },
+    {
+      "id": "g25",
+      "op": "mark",
+      "label": "endurance test"
+    },
+    {
+      "id": "g31",
+      "op": "mark",
+      "label": "persistence of grind events"
+    },
+    {
+      "id": "g32",
+      "op": "db",
+      "sql": "select count(*) as grind_rows from grind_log"
+    },
+    {
+      "id": "g33",
+      "op": "db",
+      "sql": "select count(*) as brew_rows from brew_events"
+    },
+    {
+      "id": "g34",
+      "op": "shell",
+      "cmd": "sqlite3 /db/HsgSqlite.db \"select count(*) from grind_log;\" "
+    },
+    {
+      "id": "g35",
+      "op": "state",
+      "keep": [
+        "guest.leds.AGSA_EN",
+        "guest.timer_pulse_length",
+        "grinder.last_action"
+      ]
+    }
+  ],
+  "note": "OBSERVED: StartGrindGbw/StartGrindGbt/StartGrindManual are accepted (success:true) but grindState never leaves Idle in the virtual grinder. The transition itself is unknown/untestable without a load-cell sample source; the harness records the unchanged state deterministically and asserts acceptance, not motion."
+}

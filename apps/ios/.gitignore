@@ -1,0 +1,8 @@
+# SwiftPM build products.
+.build/
+.swiftpm/
+# XcodeGen output and Xcode user state; project.yml is the source of truth.
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/

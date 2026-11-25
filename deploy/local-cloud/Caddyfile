@@ -1,0 +1,85 @@
+# Caddyfile — local-cloud edge (skeleton)
+#
+# Device side: the hostname below is the one compiled into libNgxUi.so. It is
+# resolved to this host by the owner's DNS (docs/LOCAL_CLOUD_DESIGN.md §6).
+# Mutual TLS is mandatory: the firmware presents an EC P-521 client
+# certificate and aborts the request on any TLS error.
+#
+# Paths under /etc/caddy/certs and /etc/caddy/pki are mounted read-only by
+# docker-compose.yml. They hold no secrets *in git*; create them on the host.
+{
+	admin off
+	# No ACME: this host is not reachable from the public internet.
+}
+
+# --- device-service -----------------------------------------------------
+https://ngx-secured.sync.mahlkoenig.com {
+	tls /etc/caddy/certs/device-host.crt /etc/caddy/certs/device-host.key {
+		client_auth {
+			mode require_and_verify
+			# NOTE (Caddy 2.8.4): `trust_pool file <path>` is accepted by
+			# adapt but not always honoured at handshake time; the
+			# documented 2.8 syntax is the block with `pem_file`.
+			trust_pool file {
+				pem_file /etc/caddy/pki/device-ca.pem
+			}
+		}
+	}
+
+	# Device-event bodies are the largest observed request; cap them.
+	request_body {
+		max_size 1MB
+	}
+
+	# Only the device-service namespace exists on this hostname.
+	handle /api/device-service/* {
+		reverse_proxy api:8080 {
+			# The API identifies the device from the certificate fingerprint,
+			# never from a body field (docs/LOCAL_CLOUD_DESIGN.md §3, D09).
+			# Caddy overwrites any client-supplied copy of this header, and the
+			# API only believes it with LOCAL_CLOUD_TRUST_PROXY_IDENTITY=true on
+			# a network the proxy alone can reach.
+			# The placeholder exists in caddy 2.8.4 (verified: the string
+			# `http.request.tls.client.fingerprint` is present in the binary).
+			header_up X-Client-Cert-Fingerprint {http.request.tls.client.fingerprint}
+		}
+	}
+	handle {
+		respond "not found" 404
+	}
+
+	# Access logs go to the container's stdout; ship them to the log store.
+	log {
+		output stdout
+		format json
+	}
+}
+
+# --- app backend (clean-room clients only) ------------------------------
+https://local-cloud.lan {
+	tls internal
+
+	request_body {
+		max_size 256KB
+	}
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	handle {
+		respond "not found" 404
+	}
+
+	# Access logs go to the container's stdout; ship them to the log store.
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Per-device and per-address rate limits from docs/LOCAL_CLOUD_DESIGN.md §8
+# are not expressible in the Caddy core; enforce them in the API.
+#
+# The admin console is deliberately NOT routed here. docker-compose.yml binds a
+# separate `admin` service to 127.0.0.1:8080, and `api` is not attached to the
+# `admin` network, so no request from the LAN can reach it.

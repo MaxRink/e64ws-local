@@ -1,0 +1,42 @@
+{
+  "id": "07_malformed",
+  "title": "Negative controls: malformed WSS frames, unknown routes, truncated ESP TLVs",
+  "profile": "shipped",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {"id": "m01", "op": "mark", "label": "WSS framing and JSON errors"},
+    {"id": "m02", "op": "wss.raw", "text": ""},
+    {"id": "m03", "op": "wss.raw", "text": "not json"},
+    {"id": "m04", "op": "wss.raw", "text": "{}"},
+    {"id": "m05", "op": "wss.raw", "text": "{\"type\":null,\"msgId\":1}"},
+    {"id": "m06", "op": "wss.raw", "text": "{\"type\":\"RequestDriverState\"}"},
+    {"id": "m07", "op": "wss.raw", "text": "{\"type\":\"RequestDriverState\",\"msgId\":\"abc\"}"},
+    {"id": "m08", "op": "wss.raw", "text": "{\"type\":\"GrinderAction\",\"msgId\":5}"},
+    {"id": "m09", "op": "wss.raw", "text": "{\"type\":\"GrinderAction\",\"msgId\":6,\"data\":{}}"},
+    {"id": "m10", "op": "wss.raw", "text": "{\"type\":\"GrinderAction\",\"msgId\":7,\"data\":{\"actionType\":\"NoSuchAction\"}}"},
+    {"id": "m11", "op": "wss.raw", "text": "[]"},
+    {"id": "m12", "op": "wss.raw", "text": "{\"type\":\"RequestDriverState\",\"msgId\":8,\"data\":\"x\"}"},
+    {"id": "m13", "op": "wss.raw", "text": "{\"type\":\"RequestDriverState\",\"msgId\":9,\"junk\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}"},
+
+    {"id": "m14", "op": "mark", "label": "HTTP errors"},
+    {"id": "m15", "op": "http", "method": "POST", "path": "/rest_api/login", "body": "{not-json"},
+    {"id": "m16", "op": "http", "method": "POST", "path": "/rest_api/does_not_exist"},
+    {"id": "m17", "op": "http", "method": "GET", "path": "/nope.php"},
+    {"id": "m18", "op": "http", "method": "DELETE", "path": "/rest_api/ping"},
+    {"id": "m19", "op": "http", "method": "GET", "path": "/../../etc/passwd", "secure": false},
+    {"id": "m20", "op": "http", "method": "POST", "path": "/upload_esp.php", "body": "",
+     "headers": {"Content-Type": "multipart/form-data; boundary=x"}},
+
+    {"id": "m21", "op": "mark", "label": "ESP control framing errors"},
+    {"id": "m22", "op": "esp.raw", "frame_hex": "00", "settle_ms": 300},
+    {"id": "m23", "op": "esp.raw", "frame_hex": "01066374726c5265737002ff00", "settle_ms": 300},
+    {"id": "m24", "op": "esp.raw", "frame_hex": "01086374726c5265737003", "settle_ms": 300},
+    {"id": "m25", "op": "esp.raw", "frame_hex": "01086374726c5265737002010008c7", "settle_ms": 300},
+    {"id": "m26", "op": "state", "keep": ["esp.last_error", "esp.frames_rx", "esp.requests"]},
+
+    {"id": "m27", "op": "mark", "label": "recovery: valid command after the noise"},
+    {"id": "m28", "op": "wss", "type": "RequestDriverState", "msg_id": 100},
+    {"id": "m29", "op": "assert", "source": "last_reply", "path": "data.grindState", "equals": "Idle"}
+  ]
+}

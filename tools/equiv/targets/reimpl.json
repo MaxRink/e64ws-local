@@ -1,0 +1,27 @@
+{
+  "name": "reimpl",
+  "kind": "direct",
+  "description": "Clean-room control service (tools/reimpl) with TLS REST :48443, WSS :48997, plain redirect :48080 and an in-process ESP simulator. The adapter owns a fresh state directory and a vg-shaped control socket.",
+  "http": "http://127.0.0.1:48080",
+  "https": "https://127.0.0.1:48443",
+  "wss": "wss://127.0.0.1:48997",
+  "timeout": 30,
+  "tls_verify": false,
+  "shell": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "shell"]},
+  "mint_token": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "mint_token"]},
+  "state": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "state"]},
+  "reset": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "reset"]},
+  "wait_ready": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "wait_ready"]},
+  "power": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "power"]},
+  "esp_event": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "esp_event"]},
+  "esp_raw": {"argv": ["python3", "/Users/A92615428/git/GitHub/MaxRink/mahlkoenig-e64ws-local-research/tools/reimpl/tools/harness_adapter.py", "esp_raw"]},
+  "profiles": {
+    "shipped": {"cmd": "profile shipped"},
+    "dev": {"cmd": "profile dev"}
+  },
+  "notes": [
+    "The adapter chooses the /etc/issue equivalent from the profile file; no rootfs is required.",
+    "reset deletes /db and /tmp under E64CTL_STATE_DIR, re-provisions the fixture Owner hash, and restarts the service.",
+    "power restarts the process and rotates the synthetic boot_id; other state persists."
+  ]
+}

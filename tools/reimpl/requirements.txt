@@ -1,0 +1,5 @@
+# No mandatory third-party dependencies: the service uses only the Python
+# standard library (ssl, sqlite3, http.server, socket, threading).
+# `cryptography` is optional and only used to generate a self-signed
+# certificate for --tls; without it the code falls back to the openssl CLI.
+cryptography>=50.0.2 ; extra == "tls"

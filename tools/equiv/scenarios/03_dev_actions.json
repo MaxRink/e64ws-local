@@ -1,0 +1,360 @@
+{
+  "id": "03_dev_actions",
+  "title": "Development-unlocked direct commands and the deterministic GrinderAction handlers",
+  "profile": "dev",
+  "reset": "pristine",
+  "repeat": 2,
+  "steps": [
+    {
+      "id": "a01",
+      "op": "mark",
+      "label": "dev-only direct commands"
+    },
+    {
+      "id": "a02",
+      "op": "wss",
+      "type": "RequestAdcConfig",
+      "msg_id": 1
+    },
+    {
+      "id": "a03",
+      "op": "wss",
+      "type": "RequestLogMessages",
+      "msg_id": 2,
+      "digest": [
+        "data.logMessages"
+      ]
+    },
+    {
+      "id": "a04",
+      "op": "wss",
+      "type": "RequestConfigManagerSettings",
+      "msg_id": 3
+    },
+    {
+      "id": "a05",
+      "op": "wss",
+      "type": "CustomSignal1",
+      "msg_id": 4
+    },
+    {
+      "id": "a06",
+      "op": "wss",
+      "type": "CustomSignal2",
+      "msg_id": 5
+    },
+    {
+      "id": "a07",
+      "op": "wss",
+      "type": "UpdateCpuConfig",
+      "msg_id": 6,
+      "data": {}
+    },
+    {
+      "id": "a08",
+      "op": "mark",
+      "label": "language, backlight, fans"
+    },
+    {
+      "id": "a09",
+      "op": "wss",
+      "action": "SetLanguage",
+      "msg_id": 10,
+      "data": {
+        "language": "en"
+      }
+    },
+    {
+      "id": "a10",
+      "op": "wss",
+      "action": "ToggleBacklightPower",
+      "msg_id": 11
+    },
+    {
+      "id": "a11",
+      "op": "wss",
+      "action": "SetBacklightBrightness",
+      "msg_id": 12,
+      "data": {
+        "brightness": 5
+      }
+    },
+    {
+      "id": "a12",
+      "op": "shell",
+      "cmd": "echo brightness=$(cat /sys/class/backlight/backlight/brightness) power=$(cat /sys/class/backlight/backlight/bl_power)"
+    },
+    {
+      "id": "a13",
+      "op": "wss",
+      "action": "ToggleBacklightPower",
+      "msg_id": 13
+    },
+    {
+      "id": "a14",
+      "op": "wss",
+      "action": "SetBacklightBrightness",
+      "msg_id": 14,
+      "data": {
+        "brightness": 7
+      }
+    },
+    {
+      "id": "a15",
+      "op": "wss",
+      "action": "SetFan1Duty",
+      "msg_id": 15,
+      "data": {
+        "dutyPercent": 30
+      }
+    },
+    {
+      "id": "a16",
+      "op": "wss",
+      "action": "SetFan2Duty",
+      "msg_id": 16,
+      "data": {
+        "dutyPercent": 20
+      }
+    },
+    {
+      "id": "a17",
+      "op": "wss",
+      "action": "SetFanTemperatureCtrlEnabled",
+      "msg_id": 17,
+      "data": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "a18",
+      "op": "shell",
+      "cmd": "for l in /sys/class/leds/*/brightness; do echo \"$l=$(cat $l)\"; done | sort"
+    },
+    {
+      "id": "a19",
+      "op": "mark",
+      "label": "remote-control input injection"
+    },
+    {
+      "id": "a20",
+      "op": "wss",
+      "action": "RcRotary",
+      "msg_id": 20,
+      "data": {
+        "ticks": 3
+      }
+    },
+    {
+      "id": "a21",
+      "op": "wss",
+      "action": "RcTopLeftClick",
+      "msg_id": 21
+    },
+    {
+      "id": "a22",
+      "op": "wss",
+      "action": "RcTopLeftLong",
+      "msg_id": 22
+    },
+    {
+      "id": "a23",
+      "op": "wss",
+      "action": "RcTopLeftPress",
+      "msg_id": 23
+    },
+    {
+      "id": "a24",
+      "op": "wss",
+      "action": "RcTopLeftRelease",
+      "msg_id": 24
+    },
+    {
+      "id": "a25",
+      "op": "wss",
+      "action": "RcBottomLeftClick",
+      "msg_id": 25
+    },
+    {
+      "id": "a26",
+      "op": "wss",
+      "action": "RcRotaryClick",
+      "msg_id": 26
+    },
+    {
+      "id": "a27",
+      "op": "wss",
+      "action": "RcRotaryLong",
+      "msg_id": 27
+    },
+    {
+      "id": "a28",
+      "op": "wss",
+      "action": "RcRotaryDouble",
+      "msg_id": 28
+    },
+    {
+      "id": "a29",
+      "op": "mark",
+      "label": "setup wizard, lights, logs"
+    },
+    {
+      "id": "a30",
+      "op": "wss",
+      "action": "SetSetupWizardState",
+      "msg_id": 30,
+      "data": {
+        "state": "NotRun"
+      }
+    },
+    {
+      "id": "a31",
+      "op": "wss",
+      "action": "SetSetupWizardState",
+      "msg_id": 31,
+      "data": {
+        "state": "Completed"
+      }
+    },
+    {
+      "id": "a32",
+      "op": "wss",
+      "action": "NozzleLightRunStandby",
+      "msg_id": 32
+    },
+    {
+      "id": "a33",
+      "op": "wss",
+      "action": "NozzleLightStop",
+      "msg_id": 33
+    },
+    {
+      "id": "a34",
+      "op": "wss",
+      "action": "SaveLog",
+      "msg_id": 34
+    },
+    {
+      "id": "a35",
+      "op": "wss",
+      "action": "ResetLog",
+      "msg_id": 35
+    },
+    {
+      "id": "a36b",
+      "op": "wss",
+      "action": "AddBrewEvent",
+      "msg_id": 36,
+      "data": {
+        "grindUuid": "11111111-2222-3333-4444-555555555555",
+        "machineName": "E64 WS",
+        "groupHead": 0,
+        "doseIndex": 0,
+        "validity": true,
+        "brewTimeMs": 27000,
+        "brewWeightMg": 36000
+      }
+    },
+    {
+      "id": "a36c",
+      "op": "wss",
+      "action": "GbsCreateReport",
+      "msg_id": 37
+    },
+    {
+      "id": "a36d",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "type",
+      "equals": "GbsCreateReport"
+    },
+    {
+      "id": "a36e",
+      "op": "assert",
+      "source": "last_reply",
+      "path": "refId",
+      "absent": true
+    },
+    {
+      "id": "a36f",
+      "op": "wss",
+      "type": "WifiStaConfig",
+      "msg_id": 38,
+      "data": {
+        "ssid": "vg-nonExistent",
+        "password": "secret123",
+        "dhcp": true,
+        "ip": "",
+        "gateway": "",
+        "netmask": "",
+        "dns": ""
+      }
+    },
+    {
+      "id": "a36g",
+      "op": "wss",
+      "type": "WifiConfigChanged",
+      "msg_id": 39,
+      "data": {}
+    },
+    {
+      "id": "a36h",
+      "op": "state",
+      "keep": [
+        "esp.mode",
+        "esp.connected",
+        "esp.ssid"
+      ]
+    },
+    {
+      "id": "a37",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 37
+    },
+    {
+      "id": "a38",
+      "op": "mark",
+      "label": "AGSA / calibration paths (actuator stubbed in QEMU)"
+    },
+    {
+      "id": "a55",
+      "op": "wss",
+      "action": "ResetDriverConfig",
+      "msg_id": 60
+    },
+    {
+      "id": "a56",
+      "op": "wss",
+      "type": "RequestDriverConfig",
+      "msg_id": 61
+    },
+    {
+      "id": "a57",
+      "op": "wss",
+      "type": "UpdateDriverConfig",
+      "msg_id": 62,
+      "data": {}
+    },
+    {
+      "id": "a58",
+      "op": "wss",
+      "type": "RequestDriverConfig",
+      "msg_id": 63
+    },
+    {
+      "id": "a59",
+      "op": "db",
+      "sql": "select key,value from settings order by key limit 12"
+    },
+    {
+      "id": "a60",
+      "op": "state",
+      "keep": [
+        "guest.leds",
+        "guest.backlight",
+        "esp.requests"
+      ]
+    }
+  ]
+}

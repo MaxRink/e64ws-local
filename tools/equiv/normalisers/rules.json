@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "principle": "Normalise only values that are provably environment-dependent and carry no behavioural information. Field presence, JSON types, enum strings and model numbers are never normalised.",
+  "implemented_in": "harness/normalise.py",
+  "rules": [
+    {
+      "id": "N-TIME",
+      "target": "fields hmiTime, t, lastUpdate, timestamp; patterns dd.mm.yyyy HH:MM:SS and ISO-8601",
+      "replacement": "<DATETIME>",
+      "rationale": "Wall-clock time is set by the environment, not by the HMI logic. The HMI's *format* is still compared because the surrounding string shape is preserved.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-UUID",
+      "target": "fields sessionId; RFC4122 UUID pattern",
+      "replacement": "<UUID>",
+      "rationale": "Per-database session identity; regenerated when /db is recreated. Within-run stability is asserted separately (scenario 02, capture + equals_ref), so normalisation does not hide a per-request random id.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-TOKEN",
+      "target": "64 lower-case hex characters; /tmp/tok_<64hex>",
+      "replacement": "<TOKEN>",
+      "rationale": "Bearer token minted per request by the harness (bin2hex(random_bytes(32))).",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-DURATION",
+      "target": "uptime_s, t_rel_ms, elapsed timing fields",
+      "replacement": "latency bucket (<50ms .. >=15s)",
+      "rationale": "Exact latency is CPU/scheduler dependent. Order-of-magnitude is kept so a gross regression (e.g. 30 s timeout) still shows up.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-COUNTER",
+      "target": "fields configId, powerOnCycles",
+      "replacement": "<COUNTER>",
+      "rationale": "Append-only rows: the config table gets a new row (id+1) on every HMI start and machineCounters.powerOnCycles increments per boot. The delta is recorded separately (reboot.pre_state/post_state, config hash excluding the id line), so monotonicity is still observable.",
+      "evidence": "observed: configId 1->2 after one restart; HsgConfig.json carries the same id"
+    },
+    {
+      "id": "N-MAC",
+      "target": "aa:bb:cc:dd:ee:ff",
+      "replacement": "<MAC>",
+      "rationale": "Interface MACs are assigned by the virtual NIC / DTB and are not HMI behaviour.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-ADDR",
+      "target": "ws(s)://127.0.0.1:port, http(s)://127.0.0.1:port",
+      "replacement": "<URL>",
+      "rationale": "The harness uses a dedicated port block; a reconstruction may listen elsewhere.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-IP",
+      "target": "dotted-quad IPv4",
+      "replacement": "<IP>",
+      "rationale": "Addresses come from the QEMU user-network (10.0.2.x) or the virtual AP (192.168.4.1).",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-PID",
+      "target": "pid=N / pid N",
+      "replacement": "pid=<PID>",
+      "rationale": "Process ids differ per boot.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-LOGTS",
+      "target": "leading [seconds.micros] in log lines",
+      "replacement": "[<T>]",
+      "rationale": "Log timestamps are monotonic since process start.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-EPOCH",
+      "target": "10/13-digit epoch values (expires, emulator t)",
+      "replacement": "<EPOCH>",
+      "rationale": "Absolute epoch values depend on when the run happened.",
+      "evidence": "observed"
+    },
+    {
+      "id": "N-ORDER",
+      "target": "JSON path data.logMessages (RequestLogMessages)",
+      "replacement": "sorted array",
+      "rationale": "The ring buffer is drained by concurrent writers; entry order within a drain is not stable. Content is additionally reduced to a structural digest (count/levels/categories) because the buffer is a history of ambient boot events, not a function of the scripted inputs.",
+      "evidence": "observed: two consecutive runs differed in ring content"
+    }
+  ],
+  "explicitly_not_normalised": [
+    "reply type strings, refId echo, data.success, enum values (grindState, grindFailure, setupWizardState, language)",
+    "the 59 driver-config and 48 driver-state keys, including numeric calibration constants",
+    "HTTP status codes, error bodies, and side-effect file names (after removing embedded timestamps)",
+    "sysfs values (LEDs, backlight, gpio), because those are the actuator contract",
+    "database row counts and settings keys/values",
+    "the *presence* of an esp.json heartbeat and its order-of-magnitude rate (only the exact frame count is dropped)"
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "schema": 1,
+  "firmware_build": "HEM-HSG-HMI-S01 V01.16-24",
+  "algorithm": "GbS4",
+  "vectors": [
+    {
+      "id": "v4/fresh-phase-ladder",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:206-231 and docs/GBS_ALGORITHMS.md:339-355 (strict `<3.0` near, `<=5.0` mid, far clears history, countdown), hand-derived from fresh V4 defaults.",
+      "algorithm": "GbS4",
+      "calls": [
+        {
+          "actualMs": 35000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 34000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 28500,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 28000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1250,
+          "returnedDdDum": 1250,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1020,
+          "returnedDdDum": 1020,
+          "committed": true
+        },
+        {
+          "phase": "mid",
+          "candidateDdDum": 1083,
+          "returnedDdDum": 1083,
+          "committed": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1083,
+          "returnedDdDum": 1083,
+          "committed": false,
+          "locked": true
+        },
+        {
+          "phase": "near",
+          "candidateDdDum": 1083,
+          "returnedDdDum": 1083,
+          "committed": false,
+          "locked": true
+        }
+      ],
+      "comment": "Same ladder as V3 with V4's fixed guards. Calls 1-2 consume the fresh hold countdown. Call 3 has error 2.0 s < 3.0 but only two history points, so the lock-in guard (len > 2) fails; the countdown is already 0, so error <= 5.0 selects mid and the 0.5 mid factor produces 1083. Calls 4-5 have three history points and errors 0.5 s/0 s, so the mature-near branch returns the previous adjustment 1083 and locks; that reply is not a commit, and unlike V3 the tolerance gate is never reached.",
+      "postState": {
+        "history": [
+          [
+            100,
+            35
+          ],
+          [
+            100,
+            34
+          ],
+          [
+            100,
+            30
+          ]
+        ],
+        "farFactor": 0.0,
+        "midFactor": 0.5,
+        "nearFactor": 1.0,
+        "filterRetention": 0.5,
+        "holdCyclesSetting": 2,
+        "holdCyclesRemaining": 0,
+        "lastTargetDum": 1000,
+        "lastAdjustmentDum": 1083,
+        "filteredDdTimesBrew": 3225.0
+      }
+    },
+    {
+      "id": "v4/documented-strict-3s-boundary",
+      "provenance": "V",
+      "source": "docs/GBS_ALGORITHMS.md:339-355 (worked example: three history points, lastTarget 500, lastAdjustment 510; 22.001 s locks at 510, 22.000 s enters mid and returns 447); tests/test_local_clients.py:407-437,643-678 supplies the exact three history points.",
+      "algorithm": "GbS4",
+      "implementations": [
+        "python"
+      ],
+      "preState": {
+        "v4": {
+          "history": [
+            [
+              50.0,
+              20.0
+            ],
+            [
+              49.0,
+              21.0
+            ],
+            [
+              48.0,
+              22.0
+            ]
+          ],
+          "filteredDdTimesBrew": null,
+          "hold_cyclesRemaining": 0,
+          "lastTargetDum": 500,
+          "lastAdjustmentDum": 510
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 22001,
+          "targetMs": 25000,
+          "estimatedDdDum": 505,
+          "setpointDdDum": 500,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 22000,
+          "targetMs": 25000,
+          "estimatedDdDum": 505,
+          "setpointDdDum": 500,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 510,
+          "returnedDdDum": 510,
+          "committed": false,
+          "locked": true
+        },
+        {
+          "phase": "mid",
+          "candidateDdDum": 447,
+          "returnedDdDum": 447,
+          "committed": true
+        }
+      ],
+      "comment": "Call 1: error 2.999 s < 3.0 with three history points locks in and returns 510; the lock-in returns before the history calculation, and the fresh-ladder post-state independently shows a lock-in does not append to a three-point history. Call 2: error exactly 3.0 s fails the strict `<3.0`, the countdown is 0, and error <= 5.0 selects mid. The mid candidate: effective 50.5 um * 22 s = 1111, filtered 1111 (first use), hyperbolic 44.44; the four-point prediction is 41.75, so the 0.6 blend of setpoint 50 and 41.75 is 45.05; mid factor 0.5 between 44.44 and 45.05 -> 44.745 -> 447. The plugin cannot inject V4 state, so this vector is Python-only.",
+      "capabilityGaps": {
+        "js": "The plugin cannot inject V4 history, hold countdown, last target, or last adjustment, so the documented 22.001/22.000 s lock boundary cannot be reproduced through the public surface."
+      }
+    },
+    {
+      "id": "v4/dd-change-501-cancels",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:206-212 and docs/GBS_PARITY_REVIEW.md:GBS-P07 (the `>500` guard is shared by V3 and V4).",
+      "algorithm": "GbS4",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1000,
+          "setpointDdDum": 1000,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 1501,
+          "setpointDdDum": 1501,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "near",
+          "candidateDdDum": 1071,
+          "returnedDdDum": 1071,
+          "committed": true
+        },
+        {
+          "phase": "cancel",
+          "candidateDdDum": 1071,
+          "returnedDdDum": 1071,
+          "committed": false,
+          "locked": true
+        }
+      ],
+      "comment": "Call 2's |1501-1000| = 501 exceeds the guard and returns the previous adjustment. The cancel path runs before the tolerance/history logic in both ports, but this vector does not isolate the cancel-before-lock-in ordering: after call 1 the history has only one point, so the lock-in guard would fail anyway."
+    },
+    {
+      "id": "v4/lock-in-without-restored-adjustment",
+      "provenance": "S",
+      "source": "docs/GBS_PARITY_REVIEW.md:GBS-P08: Python raises RuntimeError for the firmware bad_optional_access, the JS port returns phase near-without-adjustment with null values.",
+      "algorithm": "GbS4",
+      "implementations": [
+        "python"
+      ],
+      "preState": {
+        "v4": {
+          "history": [
+            [
+              50.0,
+              20.0
+            ],
+            [
+              49.0,
+              21.0
+            ],
+            [
+              48.0,
+              22.0
+            ]
+          ],
+          "filteredDdTimesBrew": null,
+          "hold_cyclesRemaining": 0,
+          "lastTargetDum": 505,
+          "lastAdjustmentDum": null
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 24000,
+          "targetMs": 25000,
+          "estimatedDdDum": 505,
+          "setpointDdDum": 500,
+          "toleranceMs": 0
+        }
+      ],
+      "expectedError": "RuntimeError",
+      "comment": "V4's mature-near branch dereferences the optional last adjustment with three samples and error 1.0 s < 3.0. The strict reference raises; the UI port deliberately returns nulls instead of propagating. This vector pins the strict side of that divergence.",
+      "capabilityGaps": {
+        "js": "The plugin cannot inject V4 history or lastTarget while leaving lastAdjustment null; its gbsV4Adjust has no restored-state path, so the bad_optional_access case is unreachable."
+      }
+    }
+  ]
+}

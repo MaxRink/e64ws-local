@@ -1,0 +1,140 @@
+{
+  "id": "08_hw_paths",
+  "title": "Hardware-dependent handlers (accept path only): actuator waits block the HMI in QEMU",
+  "profile": "dev",
+  "reset": "pristine",
+  "deterministic": false,
+  "repeat": 1,
+  "note": "EXCLUDED FROM THE DETERMINISM BASELINE. These handlers wait for a physical actuator (motor, AGSA sensor, fan tacho, ESP boot line). In the virtual grinder the wait never completes, so the single Qt thread that also serves WSS blocks or the app dies. Each step is run with a short timeout and a restart between groups; only the immediate reply (or its absence) is recorded.",
+  "compare_until": "w12",
+  "steps": [
+    {
+      "id": "w01",
+      "op": "wss",
+      "type": "RequestDriverState",
+      "msg_id": 1
+    },
+    {
+      "id": "w02",
+      "op": "mark",
+      "label": "ESP reset line (gpio59/60)"
+    },
+    {
+      "id": "w03",
+      "op": "wss",
+      "action": "EspReset",
+      "msg_id": 2,
+      "timeout": 8
+    },
+    {
+      "id": "w04",
+      "op": "shell",
+      "cmd": "echo gpio59=$(cat /sys/class/gpio/gpio59/value) gpio60=$(cat /sys/class/gpio/gpio60/value)"
+    },
+    {
+      "id": "w05",
+      "op": "state",
+      "keep": [
+        "guest.gpio59",
+        "esp.frames_rx"
+      ]
+    },
+    {
+      "id": "w06",
+      "op": "mark",
+      "label": "tare / calibration / AGSA"
+    },
+    {
+      "id": "w07",
+      "op": "wss",
+      "action": "StartTara",
+      "msg_id": 10,
+      "timeout": 8
+    },
+    {
+      "id": "w08",
+      "op": "wss",
+      "action": "StartCalibration",
+      "msg_id": 11,
+      "timeout": 8
+    },
+    {
+      "id": "w09",
+      "op": "wss",
+      "action": "CalibrateDdSensor",
+      "msg_id": 12,
+      "timeout": 8
+    },
+    {
+      "id": "w10",
+      "op": "wss",
+      "action": "SetAgsaTargetDdValue",
+      "msg_id": 13,
+      "data": {
+        "targetDdValue": 1200
+      },
+      "timeout": 8
+    },
+    {
+      "id": "w11",
+      "op": "wss",
+      "action": "StopAgsa",
+      "msg_id": 14,
+      "timeout": 8
+    },
+    {
+      "id": "w12",
+      "op": "state",
+      "keep": [
+        "guest.leds",
+        "guest.timer_pulse_length"
+      ]
+    },
+    {
+      "id": "w13",
+      "op": "mark",
+      "label": "fan calibration and endurance"
+    },
+    {
+      "id": "w14",
+      "op": "wss",
+      "action": "CalibrateFan1",
+      "msg_id": 20,
+      "timeout": 8
+    },
+    {
+      "id": "w15",
+      "op": "wss",
+      "action": "CalibrateFan2",
+      "msg_id": 21,
+      "timeout": 8
+    },
+    {
+      "id": "w16",
+      "op": "wss",
+      "action": "StartEnduranceTest",
+      "msg_id": 22,
+      "data": {
+        "grindTimeSec": 2,
+        "pauseTimeSec": 1
+      },
+      "timeout": 8
+    },
+    {
+      "id": "w17",
+      "op": "wss",
+      "action": "StopEnduranceTest",
+      "msg_id": 23,
+      "timeout": 8
+    },
+    {
+      "id": "w18",
+      "op": "state",
+      "keep": [
+        "guest.leds",
+        "grinder.last_action"
+      ]
+    }
+  ],
+  "compare_until_reason": "Only the immediate accept/reject replies are comparable. At w14 (CalibrateFan1) the vendor Qt thread blocks forever waiting for a fan tacho: the WSS connection EOFs, w15-w17 are refused, and the process does not recover within the run. Steps after w12 are recorded (the crash is evidence) but excluded from comparison; the reconstruction answers those same commands with success."
+}

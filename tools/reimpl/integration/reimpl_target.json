@@ -1,0 +1,23 @@
+{
+  "name": "reimpl",
+  "kind": "direct",
+  "description": "Clean-room reimplementation of the E64 WS control service (WSS :39998, REST :38080, in-process ESP simulator). Drop this file into /tmp/equiv/targets/ to run the vendor scenarios against it.",
+  "http": "http://127.0.0.1:38080",
+  "https": "",
+  "wss": "ws://127.0.0.1:39998",
+  "timeout": 30,
+  "tls_verify": false,
+  "shell": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "shell"]},
+  "mint_token": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "mint_token"]},
+  "state": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "state"]},
+  "reset": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "reset"]},
+  "wait_ready": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "wait_ready"]},
+  "esp_event": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "esp_event"]},
+  "esp_raw": {"argv": ["python3", "/tmp/reimpl/tools/target_adapter.py", "esp_raw"]},
+  "env": {"E64CTL_STATE_DIR": "/tmp/e64ctl", "E64CTL_HTTP": "http://127.0.0.1:38080"},
+  "notes": [
+    "Start the service first: python3 -m e64ctl --state-dir /tmp/e64ctl --wss-port 39998 --http-port 38080",
+    "The reimpl has no HTTPS listener; scenarios that force 'secure' requests (secure:true) must use the plain HTTP base url, or run with --tls and a TLS-capable target.",
+    "Reset clears grind/brew/event rows and re-provisions Role.Owner.LoginData with the fixture password."
+  ]
+}

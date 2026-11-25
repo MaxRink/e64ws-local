@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  No device content is backed up or copied to another phone: the app has no
+  cloud transport. Each domain is excluded explicitly because Android 12+
+  device-to-device transfer ignores android:allowBackup="false"; excluding
+  only "root" would leave shared_prefs (the encrypted owner token) eligible.
+  The Keystore key never leaves this phone, so the ciphertext would stay
+  unreadable anyway - this is the second lock, not the only one.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

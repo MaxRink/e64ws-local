@@ -1,0 +1,13 @@
+--- patches/build.sh.orig	2026-10-31 00:33:20
++++ patches/build.sh.new	2026-10-31 00:33:20
+@@ -52,6 +52,10 @@
+ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+ CONFIG_PARTITION_TABLE_CUSTOM=y
+ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
++CONFIG_ESP_CONSOLE_UART_CUSTOM=y
++CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_1=y
++CONFIG_ESP_CONSOLE_UART_TX_GPIO=18
++CONFIG_ESP_CONSOLE_UART_RX_GPIO=19
+ EOF
+   echo "== building bootloader (IDF v5.0.0) =="
+   docker run --rm -v "$d":/project -w /project \

@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Thin executable wrapper for the e64root package.
+
+Run from any directory:
+
+    tools/e64root/e64root probe --host 192.168.1.50 --insecure
+
+Or, with ``tools/`` on ``sys.path`` (for example ``cd tools``):
+
+    python3 -m e64root --help
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+TOOLS_DIR = Path(__file__).resolve().parent.parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from e64root.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())

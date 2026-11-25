@@ -1,0 +1,5 @@
+*.jks
+*.keystore
+__pycache__/
+out/
+work/

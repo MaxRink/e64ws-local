@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "firmware_build": "HEM-HSG-HMI-S01 V01.16-24",
+  "algorithm": "GbS2",
+  "vectors": [
+    {
+      "id": "v2/documented-inverse-regression-arithmetic",
+      "provenance": "V",
+      "source": "docs/GBS_ALGORITHMS.md:294-311 (worked example: points (50,30),(45,32),(40,34),(35,36), target 28 s, current 50 um -> prediction 52.5 um, blend 52.25 um -> 523 Dum).",
+      "function": "v2_inverse_regression",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The plugin's firmwareRegression and blend are internal and not exposed as an endpoint; gbsAdjust always appends its own sample, so the doc's pure four-point arithmetic cannot be called through the public surface."
+      },
+      "cases": [
+        {
+          "points": [
+            [
+              50.0,
+              30.0
+            ],
+            [
+              45.0,
+              32.0
+            ],
+            [
+              40.0,
+              34.0
+            ],
+            [
+              35.0,
+              36.0
+            ]
+          ],
+          "targetSec": 28.0,
+          "currentUm": 50.0,
+          "expected": {
+            "prediction": 52.5,
+            "candidateDdDum": 523
+          }
+        }
+      ],
+      "comment": "Direct documentation anchor. The doc's four points are a set, not a stateful V2 step: the appended sample would have to be (50,36) if the current setpoint were 50 um, so encoding this as a gbsAdjust call would silently test a different dataset. The inversion is x = mean_x - mean(y-target)/slope; slope -0.4 clamps to -0.5; 42.5 - 5.0/-0.5 = 52.5; 0.1*50 + 0.9*52.5 = 52.25; lround(522.5) = 523."
+    },
+    {
+      "id": "v2/appended-sample-trace",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:145-166 (append-before-predict, six-point window, 10/90 blend) with the documented inversion, hand-derived.",
+      "algorithm": "GbS2",
+      "preState": {
+        "v2": {
+          "points": [
+            [
+              50.0,
+              30.0
+            ],
+            [
+              45.0,
+              32.0
+            ],
+            [
+              40.0,
+              34.0
+            ]
+          ],
+          "lastResultDum": null
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 36000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 350,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 38000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 300,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": 508,
+          "returnedDdDum": 508,
+          "committed": true
+        },
+        {
+          "phase": "regression",
+          "candidateDdDum": 498,
+          "returnedDdDum": 498,
+          "committed": true
+        }
+      ],
+      "comment": "Each call appends (setpoint/10, actual/1000) before predicting. Call 1 appends (35,36) to the three restored points, reproducing the doc's four-point geometry: slope -0.4 clamps to -0.5, prediction 52.5, current 35, blend 0.1*35+0.9*52.5 = 50.75 um -> 508. Call 2 appends (30,38): the five-point slope is also -0.4 and clamps to -0.5, prediction 52.0, blend 0.1*30+0.9*52.0 = 49.8 -> 498. Both calls are outside a zero tolerance and commit.",
+      "postState": {
+        "points": [
+          [
+            50,
+            30
+          ],
+          [
+            45,
+            32
+          ],
+          [
+            40,
+            34
+          ],
+          [
+            35,
+            36
+          ],
+          [
+            30,
+            38
+          ]
+        ],
+        "lastResultDum": 498
+      }
+    },
+    {
+      "id": "v2/restored-last-result-hold",
+      "provenance": "I",
+      "source": "docs/GBS_PARITY_REVIEW.md:GBS-P06 and tools/gbs_model.py:GbsV2State host replay state (points + lastResultDum); the native GbS2 JSON schema does not carry lastResultDum. Node restores only `points`, not `lastResultDum`.",
+      "algorithm": "GbS2",
+      "preState": {
+        "v2": {
+          "points": [
+            [
+              50.0,
+              30.0
+            ]
+          ],
+          "lastResultDum": 888
+        }
+      },
+      "calls": [
+        {
+          "actualMs": 28000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 36000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 400,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": 505,
+          "returnedDdDum": 888,
+          "committed": false
+        },
+        {
+          "phase": "regression",
+          "candidateDdDum": 503,
+          "returnedDdDum": 503,
+          "committed": true
+        }
+      ],
+      "comment": "Host-replay restart fixture (not the native JSON serializer): restored history (50,30) and restored last result 888. Call 1 appends (50,28); the two-point history has zero variance, so the fallback slope -2.0 gives 50 - 1/-2 = 50.5 um, blend 0.1*50 + 0.9*50.5 = 50.45 -> 505, and |0| < 1000 holds the restored 888. Call 2 appends (40,36): slope -0.7, prediction 51.4286 um, blend 0.1*40 + 0.9*51.4286 = 50.2857 -> 503. A host that drops lastResultDum would return 500 in call 1; that gap is recorded in capabilityGaps and GBS-P06.",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The shipped plugin restores only body.points; the restored last result 888 in call 1 is not reachable through the public surface, so the hold value would be 500. The cross-language part of this fixture (call 2) is covered by v2/appended-sample-trace."
+      }
+    },
+    {
+      "id": "v2/cumulative-hold-keeps-learning",
+      "provenance": "I",
+      "source": "tests/test_local_clients.py:461-486 (sample appended before the commit gate) and docs/GBS_ALGORITHMS.md:145-166.",
+      "algorithm": "GbS2",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 1000
+        },
+        {
+          "actualMs": 28000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 3000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": 509,
+          "returnedDdDum": 509,
+          "committed": true
+        },
+        {
+          "phase": "regression",
+          "candidateDdDum": 505,
+          "returnedDdDum": 509,
+          "committed": false
+        }
+      ],
+      "comment": "Call 1: one point (50,30) with the -2.0 fallback predicts 51 um for 28 s; blend 50.9 -> 509, and |2000| is not < 1000, so it commits. Call 2 appends (50,28); the zero-variance fallback predicts 50.5 and the candidate is 505, but |0| < 3000 holds the committed 509. The hold still learns, which the next call would observe."
+    },
+    {
+      "id": "v2/variance-0.001-fallback",
+      "provenance": "I",
+      "source": "docs/GBS_ALGORITHMS.md:149-151 (variance threshold 0.001, fallback slope -2.0) and docs/GBS_PARITY_REVIEW.md:GBS-P10.",
+      "algorithm": "GbS2",
+      "calls": [
+        {
+          "actualMs": 30000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 400,
+          "toleranceMs": 0
+        },
+        {
+          "actualMs": 25000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 400,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": 409,
+          "returnedDdDum": 409,
+          "committed": true
+        },
+        {
+          "phase": "regression",
+          "candidateDdDum": 398,
+          "returnedDdDum": 398,
+          "committed": true
+        }
+      ],
+      "comment": "Both calls append the same x coordinate (40 um), so variance is exactly 0 <= 0.001 for the two-point call and the fallback slope -2.0 applies in both. Call 1: mean delta 2 s -> 40 - 2/-2 = 41 um; blend 0.1*40+0.9*41 = 40.9 -> 409. Call 2: mean delta -0.5 s -> 39.75 um; blend 39.775 -> 398. A host that computed a real slope from identical x values would divide by zero."
+    },
+    {
+      "id": "v2/negative-dd-preserved",
+      "provenance": "S",
+      "source": "src/recovered/gbs_algorithms.cpp (Dum is a signed int32) and tools/gbs_model.py output_tenths, which uses C round for negatives. Synthetic guard case; negative setpoints are outside the grinder's physical range.",
+      "algorithm": "GbS2",
+      "calls": [
+        {
+          "actualMs": 1000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": -10,
+          "toleranceMs": 0
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": -132,
+          "returnedDdDum": -132,
+          "committed": true
+        }
+      ],
+      "comment": "The single history point is (-1,1); with target 28 s the fallback slope gives -1 - (-27)/-2 = -14.5 um. Blend 0.1*(-1)+0.9*(-14.5) = -13.15 um -> -131.5 -> C round away from zero -> -132. Both operands are negative, so this is the same-sign clamp branch; it proves signed DD values survive the integer ABI and the C rounding rule."
+    },
+    {
+      "id": "v2/restored-last-result-gap",
+      "provenance": "S",
+      "source": "docs/GBS_PARITY_REVIEW.md:GBS-P06 (the JS port stores in-memory points and lastResultDum and has no restored-last-result path).",
+      "algorithm": "GbS2",
+      "implementations": [
+        "python"
+      ],
+      "capabilityGaps": {
+        "js": "The shipped plugin restores only body.points; a vector that injects lastResultDum cannot be reproduced through the public gbsAdjust surface (plugin.js gbsV2Adjust)."
+      },
+      "calls": [
+        {
+          "actualMs": 28000,
+          "targetMs": 28000,
+          "estimatedDdDum": 500,
+          "setpointDdDum": 500,
+          "toleranceMs": 1000
+        }
+      ],
+      "expected": [
+        {
+          "phase": "regression",
+          "candidateDdDum": 505,
+          "returnedDdDum": 888,
+          "committed": false
+        }
+      ],
+      "comment": "Same host-replay fixture as v2/restored-last-result-hold with one call, kept as an explicit gap so the missing restore path is visible in the matrix rather than silently dropped.",
+      "preState": {
+        "v2": {
+          "points": [
+            [
+              50.0,
+              30.0
+            ]
+          ],
+          "lastResultDum": 888
+        }
+      }
+    }
+  ]
+}

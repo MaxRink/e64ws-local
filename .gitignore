@@ -1,0 +1,51 @@
+# Local source material and generated analysis output.  The research notes record
+# hashes and reproducible commands, but do not commit vendor binaries, PDFs, or
+# extracted filesystem images by default.
+.DS_Store
+.tools/
+ghidra-project/
+*.swu
+*.pdf
+# Exception: the eight pinned public vendor release containers live in
+# firmware/ under Git LFS (see firmware/.gitattributes and
+# firmware/manifest.json).  *.swu elsewhere stays ignored.
+!firmware/*.swu
+*.img
+*.ext4
+*.gz
+*.bin
+*.scr
+!tools/virtual-grinder/boot.scr
+*.vfat
+*.zip
+
+# Decaid is developed as an independent nested Git checkout/fork.  Commit and
+# publish it from inside decaid/; do not accidentally embed its Git repository
+# as a research-repository submodule or copy.
+/decaid/
+
+# Local Python environments and caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local credentials/configuration and tool output.
+.env
+.env.*
+*.log
+captures/
+
+# Machine-local agent tooling (OpenCode MCP registrations point at absolute
+# paths on this host, so they are not shared).
+.opencode/
+
+# Built delivery bundles (reproducible artifacts, not source).
+dist/
+
+# Reconstructed ESP-IDF build trees are machine-local; use build.sh to rebuild.
+/tools/rebuild/esp-app/recon/build/
+
+# Per-session agent planning notes stay local; they duplicate across branches.
+tasks/

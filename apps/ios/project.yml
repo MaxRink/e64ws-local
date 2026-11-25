@@ -1,0 +1,85 @@
+# XcodeGen manifest for the E64 local iOS app.
+#
+# Generate the Xcode project, then build it in Xcode:
+#
+#   brew install xcodegen        # once
+#   cd apps/ios && xcodegen generate
+#   open GrinderApp.xcodeproj
+#
+# The GrinderCore Swift package is referenced as a local package at
+# ../GrinderCore and is verified independently with `swift test` or
+# `swift run GrinderCoreChecks`; see README.md.
+
+name: E64Local
+options:
+  bundleIdPrefix: io.github.maxrink
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    DEVELOPMENT_TEAM: ""            # set to your team to sign on a device
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  GrinderCore:
+    path: ../GrinderCore
+
+targets:
+  GrinderApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: GrinderApp
+        excludes:
+          - Resources/rest_api_dev.php
+          - Resources/e64local_action_run.php
+      # The bundled PHP files, copied as resources so the app can install them.
+      - path: GrinderApp/Resources/rest_api_dev.php
+        buildPhase: resources
+      - path: GrinderApp/Resources/e64local_action_run.php
+        buildPhase: resources
+    dependencies:
+      - package: GrinderCore
+        product: GrinderCore
+    info:
+      path: GrinderApp/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.maxrink.e64local
+        PRODUCT_NAME: E64 Local
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"       # iPhone only
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+        CODE_SIGN_ENTITLEMENTS: ""
+    scheme:
+      testTargets:
+        - GrinderAppTests
+
+  GrinderAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: GrinderAppTests
+    dependencies:
+      - target: GrinderApp
+      - package: GrinderCore
+        product: GrinderCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.maxrink.e64local.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+# No entitlements beyond the defaults.  In particular there is no background
+# mode, no push, no iCloud, no App Groups and no network extension: the app is a
+# foreground, LAN-only client.

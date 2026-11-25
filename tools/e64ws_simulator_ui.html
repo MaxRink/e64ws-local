@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>E64 WS local simulator</title>
+<style>
+  body { font: 15px system-ui, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; background: #f6f3ed; color: #25211c; }
+  section { background: white; border: 1px solid #d9d0c5; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  button, input { font: inherit; padding: .4rem .6rem; margin: .2rem; }
+  button { cursor: pointer; } pre { white-space: pre-wrap; max-height: 25rem; overflow: auto; background: #211f1c; color: #e8eee6; padding: 1rem; border-radius: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; }
+</style>
+<h1>E64 WS / OpenScale simulator</h1>
+<p>Local deterministic development fixture. It does not represent a physical grinder’s safety limits.</p>
+<section><h2>Grinder</h2><div class="grid">
+  <button onclick="action('StartGrindManual')">Start manual</button>
+  <button onclick="action('Stop')">Stop</button>
+  <label>DD <input id="dd" type="number" min="0" max="10000" value="5000"><button onclick="setDd()">Set</button></label>
+  <button onclick="gbsReport()">GBS report</button>
+  <button onclick="resetSim()">Reset</button>
+</div></section>
+<section><h2>Scale / shot</h2><div class="grid">
+  <button onclick="post('/sim/shot/start')">Shot start</button>
+  <label>grams <input id="grams" type="number" step=".01" value="18"></label>
+  <label>ms <input id="ms" type="number" step="1" value="28000"></label>
+  <button onclick="sample()">Add sample</button>
+  <button onclick="post('/sim/shot/stop')">Shot stop</button>
+  <button onclick="post('/sim/scale/tare')">Tare</button>
+</div></section>
+<section><h2>State</h2><pre id="state">loading…</pre></section>
+<script>
+async function post(path, body={}) { const r = await fetch(path, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); await refresh(); }
+async function action(suffix, data={}) { await post('/sim/action', {suffix, data}); }
+async function setDd() { await post('/sim/action', {suffix:'SetAgsaTargetDdValue', data:{targetDdValue:Number(document.querySelector('#dd').value)}}); }
+async function sample() { await post('/sim/shot/sample', {grams:Number(document.querySelector('#grams').value), ms:Number(document.querySelector('#ms').value)}); }
+async function gbsReport() { const r=await fetch('/sim/state'); const s=await r.json(); alert(JSON.stringify({algorithm:'GbS1',ddValueDum:s.grinder.ddValueDum,simulator:true},null,2)); }
+async function resetSim() { await post('/sim/reset'); }
+async function refresh() { const r=await fetch('/sim/state'); document.querySelector('#state').textContent=JSON.stringify(await r.json(),null,2); }
+setInterval(refresh, 1000); refresh();
+</script>

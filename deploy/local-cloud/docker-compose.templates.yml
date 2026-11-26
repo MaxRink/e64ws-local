@@ -1,0 +1,104 @@
+# Local cloud — the one template service that needs a credential to exist.
+#
+# Why this is a separate file
+# ---------------------------
+# `docker compose config` interpolates every service, including the ones in a
+# profile that is not active.  A `${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in
+# .env}` therefore fails the whole file, and keeping `db` in
+# docker-compose.yml would mean the default stack (api + proxy + admin, none of
+# which touches PostgreSQL) could not even be parsed on a fresh checkout.
+#
+# Splitting it keeps both properties true:
+#
+#   docker compose config --quiet
+#     -> passes with no .env at all: the default stack needs no secret, and an
+#        empty admin token disables the admin API rather than opening it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.templates.yml \
+#     --profile postgres config --quiet
+#     -> fails: "required variable POSTGRES_PASSWORD is missing a value: set
+#        POSTGRES_PASSWORD in .env".
+#
+# That failure is the point.  `db` used to default to a placeholder string,
+# which PostgreSQL accepts as a password, so the profile started and stayed up
+# with a published credential.  The required-variable form refuses to start
+# instead.
+#
+# The command changed, and it fails loudly rather than silently:
+# `docker compose --profile postgres config --quiet` on its own is now a no-op
+# that exits 0 (the profile selects nothing), and
+# `docker compose --profile postgres up -d db` says "no such service: db".
+# Every template command needs the `-f` above.  README.md "The postgres template
+# moved" says the same thing where the commands live.
+#
+# Nothing points at `db`: the service serves from SQLite, and the design's
+# PostgreSQL target (docs/LOCAL_CLOUD_DESIGN.md §4) is not wired.
+
+name: local-cloud
+
+# Same anchor as docker-compose.yml: Compose anchors do not cross files, so the
+# block is repeated here.  Change both.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ----------------------------------------------------------------------
+  # State: PostgreSQL.  Template only - the service uses SQLite today, and the
+  # design's PostgreSQL target (docs/LOCAL_CLOUD_DESIGN.md §4) is not wired.
+  #
+  # The mount point is /var/lib/postgresql, NOT /var/lib/postgresql/data.
+  # Since 18 the image keeps PGDATA in a major-version-specific subdirectory
+  # (/var/lib/postgresql/18/docker) and declares VOLUME /var/lib/postgresql, so
+  # it needs the parent mounted.  Mounting .../data makes 18.x exit 1 with
+  #   there appears to be PostgreSQL data in /var/lib/postgresql/data
+  #   (unused mount/volume)
+  # An existing 16.x volume holds PGDATA at its root, where 18 will not look:
+  # see "Upgrading from 16" in README.md before switching versions on a volume
+  # that already has data.
+  #
+  # 18.7 is the newest 18.x (Docker Hub last published it 2026-11-21).
+  # PostgreSQL 19.0 exists - published 2026-11-23 - and is deliberately NOT
+  # adopted here: `db` is an unused template, 19.0 has no point release yet,
+  # and 19 moves PGDATA to /var/lib/postgresql/19/docker, so the mount keeps
+  # the same parent while every existing 18 cluster becomes as unreachable as a
+  # 16 one.  Moving majors is the same dump-and-restore path as 16 -> 18, not a
+  # tag bump; README.md "Upgrading from 16" and the note under it say what that
+  # costs.  Move the tag only together with that section, or leave it alone.
+  # ----------------------------------------------------------------------
+  db:
+    profiles: ["postgres"]
+    image: postgres:18.7-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-localcloud}"
+      POSTGRES_USER: "${POSTGRES_USER:-localcloud}"
+      # No default on purpose.  A placeholder here is a password PostgreSQL
+      # accepts, so the profile would start and serve on a credential that is in
+      # the repository; unset or empty stops Compose at interpolation time,
+      # before a container exists.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      TZ: "UTC"
+    logging: *default-logging
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+# Copied from docker-compose.yml: a merged file may only reference networks and
+# volumes that some loaded file declares, and declaring one twice is a no-op
+# rather than a duplicate.
+networks:
+  internal:
+    internal: true
+
+volumes:
+  pgdata:

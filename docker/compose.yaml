@@ -1,0 +1,116 @@
+# Compose view of the targets in docker/README.md.
+#
+# Every base image is interpolated from docker/images.env, and the pins are not
+# duplicated here.  Run it from the repository root with the env file:
+#
+#   docker compose --env-file docker/images.env -f docker/compose.yaml build
+#   docker compose --env-file docker/images.env -f docker/compose.yaml run --rm py313
+#
+# Without --env-file the interpolation stops with "required variable ... is
+# missing", which is the intended failure: an unpinned build is worse than no
+# build.
+#
+# The `heavy` profile holds the two targets that must not be built here - the
+# Android SDK download and the Swift-on-Linux reproducer.  A plain
+# `docker compose build` therefore never touches them; `--profile heavy` is an
+# explicit choice, and target `ios-grindercore` is expected to fail.
+name: e64-repro
+
+services:
+  py311:
+    image: e64-py:3.11
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_311:?run with --env-file docker/images.env}
+    volumes:
+      - ../:/repo:ro
+    working_dir: /repo
+    command: ["sh", "tools/run_tests.sh"]
+
+  py313:
+    image: e64-py:3.13
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_313:?run with --env-file docker/images.env}
+    volumes:
+      - ../:/repo:ro
+    working_dir: /repo
+    command: ["sh", "tools/run_tests.sh"]
+
+  py315:
+    image: e64-py:3.15
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_315:?run with --env-file docker/images.env}
+    volumes:
+      - ../:/repo:ro
+    working_dir: /repo
+    command: ["sh", "tools/run_tests.sh"]
+
+  firmware-triage:
+    image: e64-firmware-triage:latest
+    build:
+      context: .
+      dockerfile: firmware-triage/Dockerfile
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_BOOKWORM:?run with --env-file docker/images.env}
+    volumes:
+      - ../:/repo:ro
+    working_dir: /repo
+    command: ["sh", "docker/firmware-triage/smoke.sh"]
+
+  php:
+    image: e64-php:8.4
+    build:
+      context: .
+      dockerfile: php/Dockerfile
+      args:
+        PHP_IMAGE: ${PHP_84:?run with --env-file docker/images.env}
+    volumes:
+      - ../:/repo:ro
+    working_dir: /repo
+    command: ["php", "-l", "ondevice/rest_api_dev.php"]
+
+  node26:
+    image: e64-node:26
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_26:?run with --env-file docker/images.env}
+    # decaid/ is a separate gitignored checkout, not part of this repository.
+    volumes:
+      - ../decaid:/decaid:ro
+    working_dir: /decaid
+    command: ["sh", "-c", "node --test test/plugins/*.cjs"]
+
+  android:
+    profiles: ["heavy"]
+    image: e64-android:latest
+    build:
+      context: .
+      dockerfile: android/Dockerfile
+      args:
+        JDK_IMAGE: ${TEMURIN_21:?run with --env-file docker/images.env}
+    volumes:
+      - ../apps/android:/src
+    working_dir: /src
+    command: ["./gradlew", "--version"]
+
+  ios-grindercore:
+    profiles: ["heavy"]
+    image: e64-ios-grindercore:probe
+    build:
+      # The Swift package lives under apps/, so this build needs the repository
+      # root as context rather than docker/.
+      context: ..
+      dockerfile: docker/ios-grindercore/Dockerfile
+      target: probe
+      args:
+        SWIFT_IMAGE: ${SWIFT_63:?run with --env-file docker/images.env}

@@ -17,9 +17,13 @@ https://ngx-secured.sync.mahlkoenig.com {
 	tls /etc/caddy/certs/device-host.crt /etc/caddy/certs/device-host.key {
 		client_auth {
 			mode require_and_verify
-			# NOTE (Caddy 2.8.4): `trust_pool file <path>` is accepted by
-			# adapt but not always honoured at handshake time; the
-			# documented 2.8 syntax is the block with `pem_file`.
+			# `trust_pool file { pem_file … }` is the syntax that is honoured on
+			# the pinned Caddy: `caddy adapt` emits
+			#   "client_authentication": {"mode": "require_and_verify",
+			#     "ca": {"provider": "file", "pem_files": ["…/device-ca.pem"]}}
+			# The block form below was exercised at handshake time on the
+			# pinned 2.11.9 edge (2026-11-25): no client certificate -> TLS
+			# alert, the generated client certificate -> accepted.
 			trust_pool file {
 				pem_file /etc/caddy/pki/device-ca.pem
 			}
@@ -39,8 +43,9 @@ https://ngx-secured.sync.mahlkoenig.com {
 			# Caddy overwrites any client-supplied copy of this header, and the
 			# API only believes it with LOCAL_CLOUD_TRUST_PROXY_IDENTITY=true on
 			# a network the proxy alone can reach.
-			# The placeholder exists in caddy 2.8.4 (verified: the string
-			# `http.request.tls.client.fingerprint` is present in the binary).
+			# The placeholder still exists in the pinned edge image (verified
+			# 2026-11-25: `grep -ac http.request.tls.client.fingerprint
+			# /usr/bin/caddy` -> 1; it existed in 2.8.4 too).
 			header_up X-Client-Cert-Fingerprint {http.request.tls.client.fingerprint}
 		}
 	}
@@ -55,28 +60,20 @@ https://ngx-secured.sync.mahlkoenig.com {
 	}
 }
 
-# --- app backend (clean-room clients only) ------------------------------
-https://local-cloud.lan {
-	tls internal
-
-	request_body {
-		max_size 256KB
-	}
-
-	handle /api/* {
-		reverse_proxy api:8080
-	}
-	handle {
-		respond "not found" 404
-	}
-
-	# Access logs go to the container's stdout; ship them to the log store.
-	log {
-		output stdout
-		format json
-	}
-}
-
+# --- the :443 invariant -----------------------------------------------
+# Every site in this file is on Caddy's single :443 listener, and Caddy picks
+# the TLS connection policy by SNI.  A site without `client_auth` is therefore
+# not an extra plain site: it is a catch-all hole that lets any client choose
+# that SNI, present no certificate and reach the API.  `caddy adapt` showed
+# exactly that for the `https://local-cloud.lan` site that used to live here
+# (`tls internal`, no client_auth), which is why it is gone: the app backend
+# for clean-room clients is served by Caddyfile.offline, which is the file that
+# deliberately has no client certificates.
+#
+# Do not add a site to this file without client_auth.  If an unauthenticated
+# vhost is ever needed, give it its own listen address (`:8444`) *and* do not
+# publish that port.
+#
 # Per-device and per-address rate limits from docs/LOCAL_CLOUD_DESIGN.md §8
 # are not expressible in the Caddy core; enforce them in the API.
 #

@@ -1,0 +1,1041 @@
+name: local-cloud deploy
+
+# The deployment artefacts in deploy/local-cloud/ were validated by nothing.
+# .github/workflows/ never read that directory, so the only thing standing
+# between a dependabot bump and a broken edge was the reviewer noticing three
+# changed `caddy:` lines - and nothing at all stood between an upgrade and a
+# silent regression in client-certificate verification.  tools/local_cloud is
+# covered by the suite tests.yml runs; docker-compose.yml, Caddyfile,
+# Caddyfile.offline and gen-dev-certs.sh are covered here.  This job does not
+# re-run the service tests.
+#
+# It is also the only place in CI where a real mutual-TLS handshake happens.
+# tools/local_cloud/tests/edge_config_test.py checks the same artefacts, but its
+# behavioural checks are `@skipUnless(docker_available() and
+# caddy_image_available(), "needs docker and the pinned caddy image")`, and
+# nothing in CI pulls that image: tests.yml runs the stdlib suite with no
+# Docker, and local-cloud-image.yml builds the *service* image and runs the
+# suite inside it, where the caddy image is absent too.  So on a stock runner
+# those checks skip by design, and the handshake assertions below are the only
+# thing standing between an image bump and a silent loss of client
+# authentication.  That is why none of them may skip, and why a vhost this job
+# cannot see would be worse than no job at all.
+#
+# Four gates:
+#
+#   1. `docker compose config` over every compose file in the directory: the
+#      default stack with no .env at all, the default stack with what
+#      `cp .env.example .env` produces, and each template set
+#      (docker-compose.<name>.yml merged in) both with the documented .env and
+#      with a value for every variable the model requires.  Catches YAML errors,
+#      unknown or misspelled keys, wrong types, dangling references, a variable
+#      nothing defines, and a variable .env.example never mentions.  A template
+#      set that refuses to interpolate without a credential is a property, so
+#      the refusal is asserted, not waived.  The limit is worth stating plainly:
+#      that scan covers the names compose *interpolates*.  A name the service
+#      reads at runtime - LOCAL_CLOUD_ADMIN_TOKEN, LOCAL_CLOUD_ALLOW_ANONYMOUS,
+#      LOCAL_CLOUD_TLS_CERT - is passed through env_file and never appears in a
+#      compose expression, so deleting it from .env.example leaves this gate
+#      green; the service's own suite is what covers those.
+#
+#   2. `caddy validate` against the *pinned* image for BOTH Caddyfile and
+#      Caddyfile.offline, with the files mounted exactly where the compose model
+#      mounts them.  Catches Caddyfile syntax and provisioning errors - an
+#      unclosed block, a directive that moved, a trust_pool the pinned version
+#      no longer accepts - at review time instead of on a self-hoster's host.
+#      The image is read from the compose model and must carry a @sha256 digest
+#      (a bare tag is refused), so the version that is validated is the version
+#      that runs and a repointed tag cannot slip between the two.
+#
+#   3. Real TLS handshakes against the mTLS edge, started from the compose
+#      model: a client with no certificate must be refused, a client signed by
+#      the device CA must be served, and a client signed by a rogue CA must be
+#      refused.  Every hostname the edge *serves* must refuse a certificate-less
+#      client as well, because Caddy picks the connection policy by SNI on one
+#      listener - a site without client_auth is a way in, not a second vhost.
+#      These are the highest-value assertions in the file: they notice when an
+#      upgrade quietly stops verifying client certificates, which is a change no
+#      amount of YAML parsing can see.  The vhost list and the vhost under test
+#      come from `caddy adapt`, i.e. from Caddy's own parser, never from a regex
+#      over the Caddyfile: a comma-separated address list, a brace on its own
+#      line, a port or a path all survive that way, and a hostname this job
+#      could not see would make the last assertion report "no other vhost"
+#      while the hole was live.
+#
+#      This gate does write into the checkout: gen-dev-certs.sh puts certs/ and
+#      pki/ under deploy/local-cloud/ because that is exactly what the compose
+#      service mounts.  Both are git-ignored, the runner is throwaway, and the
+#      script's own default is a private temporary directory - so nothing here
+#      leaks into the repository, but the job is not read-only either.
+#
+#   4. Docker availability.  Every gate fails when a precondition is missing;
+#      none of them skips.  There is deliberately no `if:` on any gate step, and
+#      nothing here is `continue-on-error`: a deployment check that skips itself
+#      is exactly the state this file was added to end.  On a runner without
+#      Docker this job goes red with "docker: command not found", which is the
+#      intended outcome - not a green run with a grey "skipped" footnote.
+#
+# Cost: one ubuntu-latest runner, Linux only, no matrix, no services, no macOS,
+# no paid runner.  It never builds the API image: the edge is started with
+# `--no-deps` against a stub upstream that answers as `api` on the stack's own
+# internal network, so the reverse_proxy hop is real and the only pull is the
+# Caddy image the compose file already pins.
+#
+# The gates read deploy/local-cloud/ only.  docker/** is a trigger-only path: it
+# is in the filter because this repository's other container definitions should
+# land with the deployment gates green, but no gate below opens a file under
+# docker/.  It is there to run the gates, not to be read by them.
+
+on:
+  push:
+    paths:
+      - "deploy/local-cloud/**"
+      - "docker/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "deploy/local-cloud/**"
+      - "docker/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    name: compose, Caddyfiles, mTLS edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # Gate 4, deliberately first: it is the precondition every other gate
+      # depends on, and the failure mode it exists to prevent is a green run
+      # with the deployment checks skipped.  Do not add `if:` or
+      # `continue-on-error` here or below.
+      - name: "Gate 4/4: Docker must be available (no gate below may skip)"
+        run: |
+          set -uo pipefail
+          # Deliberately not `set -e`: each probe is reported, and the step still
+          # fails at the end.  A runner without Docker is a failed deployment
+          # check, not a skipped one, and the summary says so.
+          failed=0
+          docker --version || failed=1
+          docker compose version || failed=1
+          docker info --format 'server {{.ServerVersion}} on {{.OperatingSystem}}' || failed=1
+          if [ "$failed" -ne 0 ]; then
+            printf 'gate4\tfail\tDocker or the compose plugin is missing on this runner\n' \
+              >> "$RUNNER_TEMP/gates.tsv"
+            echo "::error::this job validates the deployment with Docker; it cannot run without it"
+            echo "::error::and it will not report a skip instead - see the comment on this step"
+            exit 1
+          fi
+          printf 'gate4\tpass\tDocker and the compose plugin are present\n' >> "$RUNNER_TEMP/gates.tsv"
+
+      # Gate 1.  Two properties, both of which the deployment documents about
+      # itself: the default stack parses on a fresh checkout with no `.env` (no
+      # secret is needed to *parse* it), and every file in the set parses once a
+      # credential is supplied.  A template file that refuses to interpolate
+      # without a credential is a feature, so the refusal is verified rather
+      # than waived.
+      #
+      # Nothing is written into the checkout: compose takes the environment file
+      # with --env-file, which also means a developer's .env cannot influence
+      # the result.
+      - name: "Gate 1/4: docker compose config, default stack and template files"
+        working-directory: deploy/local-cloud
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          MAIN = "docker-compose.yml"
+          temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          siblings = sorted(path for path in glob.glob("docker-compose.*.yml")
+                            if path != MAIN)
+          sets = [[MAIN]] + [[MAIN, sibling] for sibling in siblings]
+
+          def die(message, detail=""):
+              print(f"::error::{message}")
+              for line in (detail or "").splitlines():
+                  print(f"::error::{line}")
+              sys.exit(1)
+
+          def render(file_list, env_file, extra=()):
+              command = ["docker", "compose"]
+              for name in file_list:
+                  command += ["-f", name]
+              command += ["--env-file", str(env_file)] + list(extra) + ["config"]
+              return subprocess.run(command, capture_output=True, text=True)
+
+          # --- what the model uses, per file ------------------------------------
+          INTERPOLATION = re.compile(r"(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)([^}]*)\}")
+          interpolated = {}
+          needs_value = {}
+          for name in [MAIN] + siblings:
+              text = pathlib.Path(name).read_text()
+              for match in INTERPOLATION.finditer(text):
+                  variable, rest = match.group(1), match.group(2)
+                  interpolated.setdefault(variable, set()).add(name)
+                  # ${NAME} and ${NAME:?msg} demand a value; ${NAME:-x} and
+                  # ${NAME-x} carry a default and are optional.
+                  if not rest.startswith((":-", "-")):
+                      needs_value.setdefault(variable, set()).add(name)
+
+          example_text = pathlib.Path(".env.example").read_text()
+          documented = {}
+          for line in example_text.splitlines():
+              line = line.strip()
+              if not line or line.startswith("#") or "=" not in line:
+                  continue
+              key, value = line.split("=", 1)
+              documented[key.strip()] = value.strip()
+
+          # --- documentation -----------------------------------------------------
+          # Every name the model uses must be named in .env.example, as an
+          # assignment or in a comment.  A commented example counts: that is how
+          # an optional knob such as LOCAL_CLOUD_EDGE_BIND is documented, and
+          # requiring an assignment for it would demand a value nobody needs.
+          words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", example_text))
+          undocumented = sorted(n for n in interpolated if n not in words)
+          if undocumented:
+              detail = "\n".join(f"{n}: used by {', '.join(sorted(interpolated[n]))}"
+                                  for n in undocumented)
+              die(".env.example does not mention variables the compose model uses: "
+                  + ", ".join(undocumented)
+                  + " - README.md sends an operator to that file", detail)
+
+          # --- the two environment files ----------------------------------------
+          # documented.env is literally what `cp .env.example .env` produces.
+          # synthetic.env adds a value for every variable the model requires, so
+          # a template that (correctly) refuses a placeholder credential can
+          # still be validated for schema and cross-file references.
+          documented_env = temp / "documented.env"
+          synthetic_env = temp / "synthetic.env"
+          documented_env.write_text(
+              "".join(f"{key}={value}\n" for key, value in documented.items()))
+          synthetic_env.write_text(
+              "".join(f"{key}={value}\n" for key, value in documented.items())
+              + "".join(f"{name}=ci-synthetic-value\n" for name in sorted(needs_value)
+                        if not documented.get(name)))
+
+          # --- 1. a fresh checkout needs no secret to parse the default stack ---
+          if pathlib.Path(".env").exists():
+              die("deploy/local-cloud/.env exists in the checkout; this gate must "
+                  "run against the committed files, not a developer's environment")
+          result = render([MAIN], "/dev/null")
+          if result.returncode != 0:
+              die("the default stack must parse with no .env at all",
+                  result.stderr)
+          print("1/5 no .env: docker-compose.yml parses")
+
+          # --- 2. documented .env: the default stack parses ----------------------
+          result = render([MAIN], documented_env)
+          if result.returncode != 0:
+              die("`cp .env.example .env` must be enough to parse the default "
+                  "stack", result.stderr)
+          print("2/5 documented .env: docker-compose.yml parses")
+
+          # --- 3. template sets: parse, or refuse for a documented reason -------
+          # compose only warns about an undefined variable and exits 0, so the
+          # render is scanned for it explicitly.
+          for file_list in sets:
+              label = " + ".join(file_list)
+              result = render(file_list, documented_env)
+              if result.returncode != 0:
+                  refused = re.findall(
+                      r"required variable ([A-Za-z_][A-Za-z0-9_]*) is missing a value",
+                      result.stdout + result.stderr)
+                  unexpected = [name for name in refused if documented.get(name)]
+                  if not refused or unexpected:
+                      die(f"documented .env: {label} fails for a reason .env.example "
+                          "does not explain", result.stdout + result.stderr)
+                  print(f"3/5 documented .env: {label} refuses as documented "
+                        f"({', '.join(sorted(set(refused)))})")
+              else:
+                  print(f"3/5 documented .env: {label} parses")
+
+          # --- 4. every set parses once the variables have values ---------------
+          for file_list in sets:
+              label = " + ".join(file_list)
+              result = render(file_list, synthetic_env, ["--profile", "*"])
+              if result.returncode != 0:
+                  die(f"config --quiet failed for: {label}", result.stdout + result.stderr)
+              if re.search(r"is not set", result.stderr, re.IGNORECASE):
+                  die(f"docker compose renders {label} with undefined variables:",
+                      result.stderr)
+              print(f"4/5 synthetic .env: {label} parses, no undefined variable")
+
+          # --- 5. profile-less default render, the command README.md documents --
+          result = render([MAIN], synthetic_env)
+          if result.returncode != 0:
+              die("config --quiet failed for docker-compose.yml", result.stdout + result.stderr)
+          print("5/5 synthetic .env: config --quiet on the default stack")
+
+          print(f"files validated: {', '.join([MAIN] + siblings)}")
+          print(f"variables interpolated: {len(interpolated)}, "
+                f"required without a default: {len(needs_value)}")
+          row = ("gate1\tpass\tconfig --quiet: default stack with no .env, with "
+                 "the documented .env, and every file set with values\n")
+          with open(pathlib.Path(os.environ["RUNNER_TEMP"], "gates.tsv"), "a") as handle:
+              handle.write(row)
+          PY
+
+      # Reads the one source of truth for "which image runs" and for "what the
+      # edge actually serves": the rendered compose model, and the Caddyfile as
+      # Caddy itself parses it (`caddy adapt`, run against the pinned image).
+      #
+      # The site list is deliberately NOT parsed out of the Caddyfile text.  A
+      # line matcher misses valid Caddyfiles - a comma-separated address list, a
+      # brace on its own line, a port, a path - and a missed site means the
+      # "no other vhost may serve a certificate-less client" assertion below
+      # reports "no other vhost" while the hole is live.  The adapted config
+      # has already resolved all of that, so nothing can hide.
+      - name: Read the pinned image, the edge wiring and the served vhosts
+        id: model
+        working-directory: deploy/local-cloud
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          MAIN = "docker-compose.yml"
+
+          def die(message, detail=""):
+              print(f"::error::{message}")
+              for line in (detail or "").splitlines():
+                  print(f"::error::{line}")
+              sys.exit(1)
+
+          rendered = subprocess.run(
+              ["docker", "compose", "--profile", "*", "-f", MAIN,
+               "config", "--format", "json"],
+              capture_output=True, text=True)
+          if rendered.returncode != 0:
+              die("docker compose config --format json failed", rendered.stderr)
+          model = json.loads(rendered.stdout)
+          services = model["services"]
+
+          def binds(service):
+              found = {}
+              for volume in service.get("volumes") or []:
+                  if volume.get("type") == "bind":
+                      found[volume["target"].rstrip("/")] = volume["source"].rstrip("/")
+              return found
+
+          # The mTLS edge is the service that mounts a file named exactly
+          # "Caddyfile"; the offline edge mounts "Caddyfile.offline".  Selecting
+          # it by what it mounts, not by name, survives a rename of the service
+          # or of its profile.
+          edges = [name for name, service in services.items()
+                   if any(pathlib.Path(source).name == "Caddyfile"
+                          for source in binds(service).values())]
+          if len(edges) != 1:
+              die("expected exactly one service mounting a file called Caddyfile, found "
+                  + repr(sorted(edges)) + "; update .github/workflows/local-cloud-deploy.yml")
+          edge = edges[0]
+          service = services[edge]
+          mounts = binds(service)
+
+          image = service.get("image")
+          if not image:
+              die(f"service {edge} declares no image, so there is no pin to validate")
+          # A digest is what makes "validated with this image" mean anything.
+          # A tag alone can be repointed between the run and the deploy, which is
+          # exactly the drift this job exists to catch, so it is refused here
+          # rather than left to another suite to notice.
+          if "@sha256:" not in image:
+              die(f"service {edge} uses {image!r} without a @sha256 digest; "
+                  "pin it (tag@sha256:...) like the rest of the stack")
+
+          published = sorted(f"{port['target']}->{port.get('published') or 'random'}"
+                             for port in service.get("ports") or []
+                             if isinstance(port, dict))
+
+          attached = set((service.get("networks") or {}).keys())
+          internal = [(key, net.get("name") or f"{model.get('name', 'local-cloud')}_{key}")
+                      for key, net in (model.get("networks") or {}).items()
+                      if net.get("internal") and key in attached]
+          if len(internal) != 1:
+              die(f"service {edge} must sit on exactly one internal network, found {internal!r}")
+          network = internal[0][1]
+
+          caddyfile_target = [target for target, source in mounts.items()
+                              if pathlib.Path(source).name == "Caddyfile"][0]
+
+          # --- what the edge serves, according to Caddy ------------------------
+          adapted = subprocess.run(
+              ["docker", "run", "--rm",
+               "-v", f"{pathlib.Path('Caddyfile').resolve()}:{caddyfile_target}:ro",
+               image, "caddy", "adapt", "--config", caddyfile_target,
+               "--adapter", "caddyfile"],
+              capture_output=True, text=True)
+          if adapted.returncode != 0:
+              die("caddy adapt failed, so the served vhosts cannot be enumerated",
+                  adapted.stderr)
+          config = json.loads(adapted.stdout)
+          servers = ((config.get("apps") or {}).get("http") or {}).get("servers") or {}
+          if not servers:
+              die("the adapted config serves no http server")
+
+          def hosts_in(routes):
+              found = []
+              for route in routes or []:
+                  for matcher in route.get("match") or []:
+                      found.extend(matcher.get("host") or [])
+                  for handler in route.get("handle") or []:
+                      found.extend(hosts_in(handler.get("routes")))
+              return found
+
+          def listen_port(server):
+              for address in server.get("listen") or []:
+                  match = re.search(r":(\d+)$", address)
+                  if match:
+                      return match.group(1)
+              return "443"
+
+          def policy_for(server, host):
+              # Caddy evaluates TLS connection policies in order and the first
+              # match wins, so the first policy naming this SNI is the one that
+              # governs the connection.  Two site blocks for one host therefore
+              # cannot hide a second, unauthenticated policy.
+              for policy in server.get("tls_connection_policies") or []:
+                  if host in ((policy.get("match") or {}).get("sni") or []):
+                      return policy
+              return None
+
+          entries = {}
+          for name, server in servers.items():
+              port = listen_port(server)
+              for host in hosts_in(server.get("routes")):
+                  entries[(host, port)] = {
+                      "host": host,
+                      "port": port,
+                      "policy": policy_for(server, host),
+                  }
+          if not entries:
+              die("the adapted config routes no hostname; there is nothing to test")
+
+          def mode_of(entry):
+              return (((entry["policy"] or {}).get("client_authentication") or {})
+                      .get("mode"))
+
+          # Deterministic, and reported in full: the vhost under test is the one
+          # that requires a client certificate (sorted, so it never depends on
+          # file order or on a comment that happens to contain the word).
+          authed = sorted((e for e in entries.values() if mode_of(e)),
+                          key=lambda e: (e["host"], e["port"]))
+          chosen = (authed or sorted(entries.values(), key=lambda e: (e["host"], e["port"])))[0]
+          hostname, container_port = chosen["host"], chosen["port"]
+
+          # The certificate files the chosen vhost serves, and the trust pool it
+          # verifies against - both taken from the adapted config, not from a
+          # regex over the Caddyfile.
+          tls_app = (config.get("apps") or {}).get("tls") or {}
+          load_files = (tls_app.get("certificates") or {}).get("load_files") or []
+          selection = ((chosen["policy"] or {}).get("certificate_selection") or {})
+          tags = set(selection.get("any_tag") or [])
+          chosen_files = [load for load in load_files
+                          if tags & set(load.get("tags") or [])] or load_files
+          if not chosen_files:
+              die(f"the vhost {hostname} serves no certificate from files; "
+                  "this job needs 'tls <cert> <key>' to mount them")
+          cert, key = chosen_files[0].get("certificate"), chosen_files[0].get("key")
+          trust_pool = (((chosen["policy"] or {}).get("client_authentication") or {})
+                        .get("ca") or {}).get("pem_files") or []
+
+          def host_path(container_path):
+              covering = [(target, source) for target, source in mounts.items()
+                          if container_path == target or container_path.startswith(target + "/")]
+              if not covering:
+                  die(f"the Caddyfile needs {container_path}, but service {edge} mounts "
+                      "nothing there; the container would start without it")
+              target, source = max(covering, key=lambda hit: len(hit[0]))
+              return source + container_path[len(target):]
+
+          # The mounts this job reproduces have to be one directory each: it
+          # mounts the directory, not the file.  Say so instead of mounting the
+          # wrong thing if the deployment ever spreads them out.
+          cert_dirs = sorted({str(pathlib.Path(path).parent) for path in (cert, key) if path})
+          pool_dirs = sorted({str(pathlib.Path(path).parent) for path in trust_pool})
+          if len(cert_dirs) != 1:
+              die(f"the certificate and key live in different directories {cert_dirs}; "
+                  "extend the mount loop in .github/workflows/local-cloud-deploy.yml")
+          if len(pool_dirs) > 1:
+              die(f"the trust pool spans several directories {pool_dirs}; "
+                  "extend the mount loop in .github/workflows/local-cloud-deploy.yml")
+
+          outputs = {
+              "edge": edge,
+              "image": image,
+              "container_port": container_port,
+              "network": network,
+              "host": hostname,
+              "caddyfile_target": caddyfile_target,
+              "crt_dir": cert_dirs[0],
+              "ca_dir": pool_dirs[0] if pool_dirs else "",
+              "crt_host": host_path(cert),
+              "key_host": host_path(key),
+              "ca_host": host_path(trust_pool[0]) if trust_pool else "",
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              for name, value in outputs.items():
+                  handle.write(f"{name}={value}\n")
+
+          # Every hostname the edge serves on a published port, for the "no other
+          # vhost is a way in" assertion.  Taken from the adapted config, so a
+          # comma list, a brace on its own line, a port or a path cannot hide one.
+          sites_file = pathlib.Path(os.environ["RUNNER_TEMP"], "sites.tsv")
+          sites_file.write_text("".join(
+              f"{entry['host']}\t{entry['port']}\t{mode_of(entry) or 'none'}\n"
+              for entry in sorted(entries.values(),
+                                  key=lambda e: (e["host"], e["port"]))),
+              encoding="utf-8")
+
+          facts = {
+              "edge_service": edge,
+              "image": image,
+              "published_ports": published,
+              "internal_network": network,
+              "hostname": hostname,
+              "tested_vhost": f"{hostname}:{container_port}",
+              "client_auth_mode": mode_of(chosen) or "absent",
+              "trust_pool": ", ".join(trust_pool) or "none",
+              "server_certificate": cert,
+              "served_hosts": [f"{e['host']}:{e['port']} ({mode_of(e) or 'no client auth'})"
+                               for e in sorted(entries.values(),
+                                               key=lambda e: (e["host"], e["port"]))],
+          }
+          pathlib.Path(os.environ["RUNNER_TEMP"], "facts.json").write_text(
+              json.dumps(facts, indent=2), encoding="utf-8")
+
+          for name, value in outputs.items():
+              print(f"{name:18} {value}")
+          print("served hostnames:")
+          for entry in facts["served_hosts"]:
+              print(f"                   {entry}")
+          PY
+
+      # Not a gate: the throwaway material gates 2 and 3 need.  It is produced by
+      # the repository's own script, the one a self-hoster runs, so a change that
+      # breaks that script fails here too.
+      - name: Development TLS material (gen-dev-certs.sh) and a rogue CA
+        id: material
+        working-directory: deploy/local-cloud
+        env:
+          CRT_HOST: ${{ steps.model.outputs.crt_host }}
+          KEY_HOST: ${{ steps.model.outputs.key_host }}
+          CA_HOST: ${{ steps.model.outputs.ca_host }}
+        run: |
+          set -euo pipefail
+
+          # gen-dev-certs.sh documents "Requires openssl 3 or newer".  Older
+          # builds (and the LibreSSL that macOS ships) sign with SHA-1, which the
+          # Go verifier inside Caddy refuses - the handshake then fails with
+          # "unknown ca" and looks like a client-authentication bug.  Say which
+          # openssl this is, and refuse to run the handshake on one that cannot
+          # produce material the edge will accept.
+          openssl version
+          case $(openssl version) in
+            "OpenSSL 3"*|"OpenSSL 4"*|"OpenSSL 5"*|"OpenSSL 6"*) ;;
+            *)
+              echo "::error::gen-dev-certs.sh requires OpenSSL 3 or newer; this is $(openssl version)."
+              echo "::error::Older builds sign certificates with SHA-1, which Caddy refuses, so the"
+              echo "::error::handshake below would fail for a reason that has nothing to do with the"
+              echo "::error::deployment. Use a runner with OpenSSL 3 or newer."
+              exit 1
+              ;;
+          esac
+
+          # Writes certs/ and pki/ next to the script, exactly as README.md
+          # documents; both directories are git-ignored.  This is a throwaway
+          # runner checkout, and the compose service mounts exactly these paths;
+          # gen-dev-certs.sh's own default is a private temporary directory.
+          sh gen-dev-certs.sh "$PWD"
+
+          # The Caddyfile names the files it needs and the compose model decides
+          # where they appear; if those two disagree, the container would start
+          # without them, so say so here instead of failing at handshake time.
+          for file in "$CRT_HOST" "$KEY_HOST"; do
+            if [ ! -s "$file" ]; then
+              echo "::error::the deployment expects $file, and gen-dev-certs.sh did not create it"
+              echo "::error::files present:"
+              find certs pki -maxdepth 1 -type f 2>&1 | sort | sed 's/^/  /'
+              exit 1
+            fi
+            echo "material: $file ($(wc -c < "$file") bytes)"
+          done
+          if [ -n "${CA_HOST:-}" ]; then
+            if [ ! -s "$CA_HOST" ]; then
+              echo "::error::the Caddyfile trusts $CA_HOST, which gen-dev-certs.sh did not create"
+              exit 1
+            fi
+            echo "material: $CA_HOST (trust pool)"
+          else
+            echo "material: the Caddyfile declares no client_auth trust pool"
+          fi
+
+          # The CA that signed the edge's certificate, found by verifying the
+          # certificate against every candidate rather than by trusting a file
+          # name: the handshake client has to trust whatever the edge presents,
+          # and this also proves the CA and the server certificate belong
+          # together.
+          ca_cert=""
+          project_root=$(dirname "$(dirname "$CRT_HOST")")
+          for candidate in $(find "$project_root" -maxdepth 3 -type f \
+                               \( -name '*.pem' -o -name '*.crt' \) | sort); do
+            [ "$candidate" = "$CRT_HOST" ] && continue
+            if openssl verify -CAfile "$candidate" "$CRT_HOST" > /dev/null 2>&1; then
+              ca_cert=$candidate
+              break
+            fi
+          done
+          if [ -z "$ca_cert" ]; then
+            echo "::error::no CA certificate among the generated material verifies $CRT_HOST"
+            exit 1
+          fi
+          echo "ca_cert=$ca_cert" >> "$GITHUB_OUTPUT"
+          echo "server verification CA: $ca_cert"
+
+          # A client certificate from a CA the edge does not trust.  Generated
+          # independently of the repository's material on purpose: if the edge
+          # ever accepts it, client authentication is not being verified.
+          rogue="$RUNNER_TEMP/rogue"
+          rm -rf "$rogue"
+          mkdir -p "$rogue"
+          openssl ecparam -name prime256v1 -genkey -noout -out "$rogue/ca.key"
+          openssl req -x509 -new -key "$rogue/ca.key" -days 2 \
+            -subj "/CN=rogue CI client CA" -out "$rogue/ca.pem"
+          printf 'extendedKeyUsage=clientAuth\nbasicConstraints=CA:FALSE\n' > "$rogue/ext.cnf"
+          openssl ecparam -name secp521r1 -genkey -noout -out "$rogue/client.key"
+          openssl req -new -key "$rogue/client.key" -subj "/CN=rogue-client" \
+            -out "$rogue/client.csr"
+          openssl x509 -req -in "$rogue/client.csr" -days 2 \
+            -CA "$rogue/ca.pem" -CAkey "$rogue/ca.key" -CAcreateserial \
+            -extfile "$rogue/ext.cnf" -out "$rogue/client.crt"
+
+          # The device-side certificate, found by its extended key usage rather
+          # than by file name: what the handshake needs is "the certificate the
+          # firmware would present", and this job should not have to care what
+          # gen-dev-certs.sh calls it.
+          client_cert=""
+          for candidate in "$(dirname "$CRT_HOST")"/*.crt; do
+            [ -f "$candidate" ] || continue
+            [ "$candidate" = "$CRT_HOST" ] && continue
+            # `-text` rather than `-ext`: `-ext` only exists in OpenSSL 3 and
+            # later, and the LibreSSL build macOS ships rejects it - a check that
+            # depends on which openssl happens to come first in PATH is a check
+            # that flaps.  The text output carries the same line everywhere.
+            # It is read into a variable rather than piped into `grep -q` for the
+            # same reason: under `set -o pipefail`, grep exiting on the first
+            # match can leave openssl writing into a closed pipe.
+            details=$(openssl x509 -in "$candidate" -noout -text 2>/dev/null || true)
+            case $details in
+              *"Client Authentication"*) client_cert=$candidate ;;
+            esac
+          done
+          if [ -z "$client_cert" ] || [ ! -s "${client_cert%.crt}.key" ]; then
+            echo "::error::no client certificate (clientAuth EKU) next to $CRT_HOST;"
+            echo "::error::gen-dev-certs.sh changed its output and this job needs updating"
+            exit 1
+          fi
+          echo "client_cert=$client_cert" >> "$GITHUB_OUTPUT"
+          echo "client_key=${client_cert%.crt}.key" >> "$GITHUB_OUTPUT"
+          echo "client certificate: $client_cert"
+
+          if [ -n "${CA_HOST:-}" ]; then
+            echo "device CA: $(openssl x509 -in "$CA_HOST" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+          fi
+          echo "rogue CA:  $(openssl x509 -in "$rogue/ca.pem" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+
+      # Gate 2.  Both files, the pinned image, and - for the real edge - the
+      # certificate and trust pool mounted at the paths the compose model uses,
+      # because `caddy validate` provisions the TLS app and fails without them.
+      # The first command is the one Caddyfile.offline's own header documents.
+      - name: "Gate 2/4: caddy validate both Caddyfiles with the pinned image"
+        working-directory: deploy/local-cloud
+        env:
+          IMAGE: ${{ steps.model.outputs.image }}
+          CADDYFILE_TARGET: ${{ steps.model.outputs.caddyfile_target }}
+          CRT_DIR: ${{ steps.model.outputs.crt_dir }}
+          CA_DIR: ${{ steps.model.outputs.ca_dir }}
+          CRT_HOST: ${{ steps.model.outputs.crt_host }}
+          CA_HOST: ${{ steps.model.outputs.ca_host }}
+        run: |
+          set -euo pipefail
+          echo "image: $IMAGE"
+
+          # 1. The offline edge: no certificates, no ACME, valid on a fresh
+          #    checkout.  This is the exact command Caddyfile.offline documents.
+          docker run --rm \
+            -v "$PWD/Caddyfile.offline:$CADDYFILE_TARGET:ro" \
+            "$IMAGE" \
+            caddy validate --config "$CADDYFILE_TARGET" --adapter caddyfile
+
+          # 2. The mTLS edge, mounted the way docker-compose.yml mounts it.  The
+          #    trust pool is mounted only when the Caddyfile declares one, so a
+          #    deployment that lost client_auth reaches gate 3 and is judged
+          #    there instead of failing this gate for the wrong reason.
+          mounts=(-v "$PWD/Caddyfile:$CADDYFILE_TARGET:ro"
+                  -v "$(dirname "$CRT_HOST"):$CRT_DIR:ro")
+          if [ -n "${CA_HOST:-}" ]; then
+            mounts+=(-v "$(dirname "$CA_HOST"):$CA_DIR:ro")
+          fi
+          docker run --rm "${mounts[@]}" "$IMAGE" \
+            caddy validate --config "$CADDYFILE_TARGET" --adapter caddyfile
+
+          printf 'gate2\tpass\tcaddy validate: Caddyfile and Caddyfile.offline, image %s\n' \
+            "$IMAGE" >> "$RUNNER_TEMP/gates.tsv"
+
+      # Gate 3.  The edge is started from the compose model itself - same
+      # service, image, bind mounts, healthcheck and networks - with --no-deps,
+      # and a stub upstream answers as `api` on the stack's internal network, so
+      # the reverse_proxy hop is real.  Only the host-side port binding is
+      # overridden (to a free loopback port), which is the one thing a shared
+      # runner cannot be trusted to leave alone.
+      - name: "Gate 3/4: mTLS handshake - no certificate, device CA, rogue CA"
+        working-directory: deploy/local-cloud
+        env:
+          EDGE: ${{ steps.model.outputs.edge }}
+          IMAGE: ${{ steps.model.outputs.image }}
+          CONTAINER_PORT: ${{ steps.model.outputs.container_port }}
+          NETWORK: ${{ steps.model.outputs.network }}
+          HOSTNAME_TEST: ${{ steps.model.outputs.host }}
+          CERT_PEM: ${{ steps.material.outputs.ca_cert }}
+          CLIENT_CERT: ${{ steps.material.outputs.client_cert }}
+          CLIENT_KEY: ${{ steps.material.outputs.client_key }}
+        run: |
+          set -euo pipefail
+
+          # Publish the edge on a free loopback port instead of the ports the
+          # compose file declares.  The service keeps its own definition - image,
+          # bind mounts, healthcheck, networks, depends_on - and only the
+          # host-side binding moves, so this job needs no privileged port and
+          # cannot collide with another stack sharing the runner.  The container
+          # port is the one Caddy actually listens on for that host, taken from
+          # the adapted config.
+          cat > "$RUNNER_TEMP/edge-override.yml" <<YAML
+          services:
+            $EDGE:
+              ports: !override
+                - "127.0.0.1::$CONTAINER_PORT"
+          YAML
+          export OVERRIDE_FILE="$RUNNER_TEMP/edge-override.yml"
+          export SITES_FILE="$RUNNER_TEMP/sites.tsv"
+
+          cat > "$RUNNER_TEMP/mtls.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          # Three handshakes against the mTLS edge of the local cloud.
+          #
+          # curl is used rather than `openssl s_client` because the assertion
+          # that matters is "was the request served", not "did bytes flow": a
+          # served request reaches the stub upstream and returns its marker,
+          # while the edge's own fallback answers 404 and a refused handshake
+          # returns no HTTP status at all.
+          #
+          # Exit codes are classified, not merely tested for non-zero, so a
+          # broken harness - no route to the edge, an unreadable CA - can never
+          # be mistaken for a client that was correctly refused.
+          set -uo pipefail
+
+          die() { echo "::error::$*"; exit 1; }
+
+          : "${EDGE:?}" "${IMAGE:?}" "${CONTAINER_PORT:?}" "${NETWORK:?}" "${HOSTNAME_TEST:?}"
+          : "${CERT_PEM:?}" "${CLIENT_CERT:?}" "${CLIENT_KEY:?}" "${LC_DIR:?}"
+          : "${OVERRIDE_FILE:?}" "${SITES_FILE:?}"
+
+          stub=lc-ci-upstream
+          compose=(docker compose --profile '*' -f docker-compose.yml -f "$OVERRIDE_FILE")
+
+          cleanup() { docker rm -f "$stub" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          # The edge first: `docker compose up` is what creates the stack's
+          # networks, and the stub below has to join one of them.
+          echo "starting $EDGE from the compose model"
+          if ! ( cd "$LC_DIR" && "${compose[@]}" up -d --no-deps "$EDGE" ); then
+            die "docker compose up failed for $EDGE"
+          fi
+
+          container=$( cd "$LC_DIR" && "${compose[@]}" ps -q "$EDGE" )
+          [ -n "$container" ] || die "compose reported no container for $EDGE"
+
+          published=$( cd "$LC_DIR" && "${compose[@]}" port "$EDGE" "$CONTAINER_PORT" )
+          port=${published##*:}
+          case $port in
+            ''|*[!0-9]*) die "no host port was published for container port $CONTAINER_PORT (got '$published')" ;;
+          esac
+          endpoint="https://$HOSTNAME_TEST:$port/api/device-service/system/time"
+          echo "edge is published on 127.0.0.1:$port -> container port $CONTAINER_PORT"
+
+          # Stand in for the `api` service, which --no-deps deliberately does not
+          # start.  The marker makes "the proxy handed this to the upstream"
+          # distinguishable from "the edge answered from its own fallback",
+          # which is what turns a silent misroute into a 404 nobody notices.
+          docker rm -f "$stub" >/dev/null 2>&1 || true
+          if ! docker run -d --name "$stub" --network "$NETWORK" --network-alias api \
+               "$IMAGE" caddy respond --listen :8080 "stub-upstream-ok" > /dev/null; then
+            docker logs "$stub" 2>&1 | tail -20
+            die "could not start the stub upstream on network $NETWORK"
+          fi
+          if [ "$(docker inspect --format '{{.State.Running}}' "$stub")" != "true" ]; then
+            docker logs "$stub" 2>&1 | tail -20
+            die "the stub upstream exited immediately"
+          fi
+
+          # Wait for the service's own healthcheck, which is `caddy validate`
+          # inside the real mount layout: that alone proves the edge accepted its
+          # configuration and its certificates.  A service with no healthcheck
+          # falls back to waiting for the listener.
+          state=""
+          for _ in $(seq 1 90); do
+            state=$(docker inspect --format \
+              '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")
+            case $state in
+              healthy|none) break ;;
+              unhealthy) break ;;
+            esac
+            sleep 1
+          done
+          if [ "$state" != healthy ] && [ "$state" != none ]; then
+            docker logs "$container" 2>&1 | tail -40
+            die "the mTLS edge never became healthy (health: $state)"
+          fi
+          if [ "$state" = none ]; then
+            listening=0
+            for _ in $(seq 1 60); do
+              if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then listening=1; break; fi
+              sleep 1
+            done
+            [ "$listening" = 1 ] || { docker logs "$container" 2>&1 | tail -40; die "no listener on 127.0.0.1:$port"; }
+          fi
+          echo "edge is up (health: $state)"
+
+          case_rc=0
+          case_http=""
+          case_body=""
+          # How the server certificate is judged, per case.  The device vhost is
+          # verified against the generated CA, so anything that refuses a client
+          # there is client authentication.  Another vhost may present a
+          # certificate from a CA this job does not hold (`tls internal`), and
+          # verifying against the device CA would then fail for the wrong reason
+          # and *look* like a refusal - which is exactly how a catch-all vhost
+          # would slip past this job.  Those are probed with -k, so the only
+          # thing that can refuse them is the connection's client-auth policy.
+          case_trust=(--cacert "$CERT_PEM")
+          run_case() { # label, then extra curl arguments
+            local label=$1
+            shift
+            local body err code
+            body=$(mktemp); err=$(mktemp); code=$(mktemp)
+            curl --silent --show-error \
+              --resolve "$HOSTNAME_TEST:$port:127.0.0.1" \
+              "${case_trust[@]}" \
+              "$@" -o "$body" -w '%{http_code}' "$endpoint" > "$code" 2> "$err"
+            case_rc=$?
+            case_http=$(cat "$code")
+            case_body=$(cat "$body")
+            echo "[$label] curl exit $case_rc, http ${case_http:-none}, body '$(printf '%.60s' "$case_body")'"
+            if [ -s "$err" ]; then echo "[$label] curl stderr: $(tr '\n' ' ' < "$err")"; fi
+            rm -f "$body" "$err" "$code"
+            return 0
+          }
+
+          expect_refused() { # label, exit code
+            case $2 in
+              0)
+                echo "FAIL $1: the edge served a request that presented no trusted client certificate"
+                return 1 ;;
+              6|7|28)
+                echo "FAIL $1: curl could not reach the edge at all (exit $2) - a broken harness, not a rejection"
+                return 1 ;;
+              60|77)
+                echo "FAIL $1: curl could not verify the server certificate (exit $2) - the generated CA and --cacert disagree"
+                return 1 ;;
+            esac
+            echo "PASS $1: refused at the TLS layer (curl exit $2)"
+            return 0
+          }
+
+          expect_served() { # label, exit code, http code, body
+            if [ "$2" -ne 0 ]; then
+              echo "FAIL $1: exit $2 - the edge refused a client signed by the device CA"
+              return 1
+            fi
+            if [ "$3" != "200" ] || [ "$4" != "stub-upstream-ok" ]; then
+              echo "FAIL $1: TLS accepted but the request did not reach the upstream (http $3)"
+              echo "FAIL $1: check that the Caddyfile still proxies /api/device-service/* to api:8080"
+              return 1
+            fi
+            echo "PASS $1: served, 200 from the stub upstream"
+            return 0
+          }
+
+          failed=0
+          record() { # label, result
+            printf 'gate3\t%s\t%s\n' "$2" "$1" >> "$RUNNER_TEMP/gates.tsv"
+          }
+
+          echo "--- 1) no client certificate: must be refused ---"
+          run_case "no certificate"
+          if expect_refused "no certificate" "$case_rc"; then
+            record "handshake: no client certificate refused" pass
+          else
+            record "handshake: no client certificate refused" fail
+            failed=1
+          fi
+
+          echo "--- 2) client signed by the device CA: must be served ---"
+          run_case "device CA client" --cert "$CLIENT_CERT" --key "$CLIENT_KEY"
+          if expect_served "device CA client" "$case_rc" "$case_http" "$case_body"; then
+            record "handshake: device CA client served" pass
+          else
+            record "handshake: device CA client served" fail
+            failed=1
+          fi
+
+          echo "--- 3) client signed by a rogue CA: must be refused ---"
+          run_case "rogue CA client" --cert "$RUNNER_TEMP/rogue/client.crt" \
+            --key "$RUNNER_TEMP/rogue/client.key"
+          if expect_refused "rogue CA client" "$case_rc"; then
+            record "handshake: rogue CA client refused" pass
+          else
+            record "handshake: rogue CA client refused" fail
+            failed=1
+          fi
+
+          # Caddy selects the TLS connection policy by SNI on one listener, so a
+          # site without client_auth is not a second vhost: it is a way in that
+          # needs no certificate.  Every other https site must refuse one too.
+          # A site on a container port this job does not publish cannot be
+          # reached at all, which is reported rather than silently skipped.
+          echo "--- 4) no other vhost the edge serves may accept a client with no certificate ---"
+          # The list comes from `caddy adapt`, so every hostname Caddy actually
+          # routes is here - including ones written as a comma-separated address
+          # list, with the brace on its own line, on another port, or under a
+          # path.  The vhost under test is skipped by its (host, port) pair, not
+          # by hostname alone.
+          others=0
+          while IFS=$'\t' read -r host site_port mode; do
+            [ -n "$host" ] || continue
+            if [ "$host" = "$HOSTNAME_TEST" ] && [ "$site_port" = "$CONTAINER_PORT" ]; then
+              continue
+            fi
+            others=$((others + 1))
+            if [ "$site_port" != "$CONTAINER_PORT" ]; then
+              echo "NOTE $host:$site_port listens inside the container on a port this job"
+              echo "NOTE does not publish - nothing outside can reach it"
+              record "handshake: $host:$site_port is on an unpublished port" "n/a"
+              continue
+            fi
+            case_trust=(-k)
+            HOSTNAME_TEST=$host endpoint="https://$host:$port/" \
+              run_case "no certificate @ $host:$site_port"
+            case_trust=(--cacert "$CERT_PEM")
+            if expect_refused "no certificate @ $host:$site_port" "$case_rc"; then
+              record "handshake: $host:$site_port refused a client with no certificate" pass
+            else
+              record "handshake: $host:$site_port served a client with no certificate (client_auth: $mode)" fail
+              failed=1
+            fi
+          done < "$SITES_FILE"
+          [ "$others" -gt 0 ] || echo "the edge serves exactly one hostname; nothing else to probe"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "--- edge log ---"
+            docker logs "$container" 2>&1 | tail -40
+            die "at least one handshake assertion failed"
+          fi
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/mtls.sh"
+          LC_DIR="$PWD" bash "$RUNNER_TEMP/mtls.sh"
+
+      - name: Tear down the stack
+        if: always()
+        run: |
+          set -uo pipefail
+          docker rm -f lc-ci-upstream > /dev/null 2>&1 || true
+          if [ -d deploy/local-cloud ]; then
+            files=(-f docker-compose.yml)
+            if [ -f "$RUNNER_TEMP/edge-override.yml" ]; then
+              files+=(-f "$RUNNER_TEMP/edge-override.yml")
+            fi
+            ( cd deploy/local-cloud && docker compose --profile '*' "${files[@]}" down -v --remove-orphans ) || true
+          fi
+
+      # The summary names every gate and its outcome.  A gate that never
+      # reported is shown as "not reached", so a skipped check is visible as a
+      # red job rather than a silent absence.
+      - name: Job summary
+        if: always()
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          runner_temp = pathlib.Path(os.environ.get("RUNNER_TEMP", "/tmp"))
+          gates = [line.split("\t", 2) for line in
+                   (runner_temp / "gates.tsv").read_text().splitlines()] \
+                  if (runner_temp / "gates.tsv").exists() else []
+          reported = {row[0]: row for row in gates if len(row) == 3}
+
+          facts = {}
+          if (runner_temp / "facts.json").exists():
+              facts = json.loads((runner_temp / "facts.json").read_text())
+
+          order = [
+              ("gate4", "Docker available"),
+              ("gate1", "compose config --quiet"),
+              ("gate2", "caddy validate"),
+              ("gate3", "mTLS handshake"),
+          ]
+          handshakes = [row for row in gates if row[0] == "gate3"]
+          lines = ["## local-cloud deployment validation", ""]
+          if facts:
+              lines += [
+                  f"- edge service: `{facts.get('edge_service')}`",
+                  f"- pinned image: `{facts.get('image')}`",
+                  f"- client_auth mode in the Caddyfile: `{facts.get('client_auth_mode')}`",
+                  f"- trust pool: `{facts.get('trust_pool')}`",
+                  f"- tested vhost: `{facts.get('tested_vhost')}`",
+                  f"- hostnames the edge serves (from `caddy adapt`): "
+                  f"`{'; '.join(facts.get('served_hosts') or []) or 'none'}`",
+                  f"- ports the compose file publishes: `{', '.join(facts.get('published_ports') or []) or 'none'}`",
+                  f"- internal network: `{facts.get('internal_network')}`",
+                  "",
+              ]
+          lines += ["| gate | result | detail |", "| --- | --- | --- |"]
+          for key, title in order:
+              if key == "gate3":
+                  for row in handshakes:
+                      lines.append(f"| {title} | {row[1]} | {row[2]} |")
+                  if not handshakes:
+                      lines.append(f"| {title} | not reported | see the red step above |")
+                  continue
+              row = reported.get(key)
+              if row:
+                  lines.append(f"| {title} | {row[1]} | {row[2]} |")
+              else:
+                  lines.append(f"| {title} | not reported | see the red step above |")
+          lines += [
+              "",
+              "No gate in this job is conditional: a check that does not report is a",
+              "failure, not a skip.",
+          ]
+          print("\n".join(lines))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines) + "\n")
+          PY

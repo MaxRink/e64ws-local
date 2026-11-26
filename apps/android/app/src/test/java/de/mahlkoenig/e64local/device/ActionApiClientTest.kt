@@ -577,10 +577,22 @@ class ActionApiClientTest {
 
     @Test
     fun `every action route the client posts is in the published OpenAPI document`() {
+        val document = java.io.File("../../../docs/openapi/local-api.yaml")
+        // docs/ is research prose and the export gate withholds it, so the
+        // published subset of this tree carries no OpenAPI document. Where it
+        // exists -- here -- the routes are asserted; where it does not, skip
+        // naming the missing path instead of failing on a file that checkout was
+        // never meant to contain.
+        org.junit.Assume.assumeTrue(
+            "docs/openapi/local-api.yaml is withheld by the export gate " +
+                "(research-prose / publish with changes), so route coverage " +
+                "cannot be checked in this checkout",
+            document.isFile,
+        )
         val source = java.io.File(
             "src/main/java/de/mahlkoenig/e64local/device/ActionApiClient.kt",
         ).readText()
-        val spec = java.io.File("../../../docs/openapi/local-api.yaml").readText()
+        val spec = document.readText()
         val routes = Regex("\"(/rest_api/[a-z_]+)\"").findAll(source)
             .map { it.groupValues[1] }
             .toSet()

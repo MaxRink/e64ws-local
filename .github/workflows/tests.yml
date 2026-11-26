@@ -24,8 +24,52 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # The e64root suite runs the real PHP module in a throwaway container.
+      # tools/run_tests.py fails that suite when the image is missing instead
+      # of collecting 35 fewer tests, so the image is part of the job.
+      - name: Pull the PHP image the e64root suite needs
+        run: docker pull php:8.3-cli
+
       # No pip install, no network fixtures, no cache. The Python suites use
       # only the standard library; the C++ host suite uses the compiler that
       # ships with the runner image.
       - name: Run offline test suites
         run: sh tools/run_tests.sh
+
+  # The recorded test counts in docs/TEST_INVENTORY.md are a gate: a suite that
+  # stops running, or reports fewer tests than the document records, fails here.
+  # The tool's own parsers cannot be reached by tools/run_tests.py (its coverage
+  # manifest rejects an unknown tools/test_*.py, which is why the file is called
+  # check_test_inventory.py), so --self-test is what exercises them.
+  #
+  # If a change legitimately moves the counts, record the new measurement in the
+  # same pull request with:
+  #   python3 tools/check_test_inventory.py --write    (needs the sibling checkouts)
+  # and let the diff show the movement. CI only re-measures this repository; the
+  # three sibling suites are absent here and would be unproven, so --local is used.
+  #
+  # --strict-rise makes CI require the recorded counts to be exact rather than a
+  # floor. Without it a stale count only prints a note, and a later deletion
+  # smaller than the unrecorded rise lands back on the recorded number and passes.
+  test-inventory:
+    name: test inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # --local runs `sh tools/run_tests.sh`, and tools/run_tests.py fails the
+      # e64root suite when its declared image is absent (see #63), so this job
+      # needs the same image the `tests` job pulls.
+      - name: Pull the PHP image the e64root suite needs
+        run: docker pull php:8.3-cli
+
+      - name: Test the inventory tool's parsers and guards
+        run: python3 tools/check_test_inventory.py --self-test
+
+      - name: Re-measure this repository and compare with docs/TEST_INVENTORY.md
+        run: python3 tools/check_test_inventory.py --local --strict-rise

@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+from tools.required_inputs import skip_without  # noqa: E402  (ROOT is on sys.path)
 TOOL = ROOT / "tools" / "todo_status.py"
 TODO = ROOT / "todo.md"
 ARCHIVE = ROOT / "docs" / "archive" / "todo-2026-10-31.md"
@@ -29,11 +30,15 @@ def _load(path: Path = TOOL):
 
 
 class BacklogTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.tool = _load()
-        cls.lines = cls.tool.load(TODO)
-        cls.entries = cls.tool.items(cls.lines)
+    def setUp(self) -> None:
+        # todo.md and GOAL.md are research prose; the gate withholds them.  The
+        # backlog is re-read per test rather than per class so that a skip still
+        # counts the case: a class-level skip would drop these tests out of the
+        # run entirely and quietly lower the suite total.
+        skip_without(["todo.md", "GOAL.md"])
+        self.tool = _load()
+        self.lines = self.tool.load(TODO)
+        self.entries = self.tool.items(self.lines)
 
     def test_tracked_backlog_has_no_problems(self):
         self.assertEqual(self.tool.problems(self.lines), [])
@@ -163,6 +168,10 @@ class RuleTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # The archive and the backlog it was split from are both withheld.
+        skip_without(["todo.md", "docs/archive/todo-2026-10-31.md"])
+
     def test_archive_preserves_the_old_checklist(self):
         self.assertTrue(ARCHIVE.is_file(), "the archived checklist is missing")
         lines = ARCHIVE.read_text(encoding="utf-8").splitlines()

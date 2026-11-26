@@ -334,6 +334,27 @@ class E64LocalAPI:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
+    def _rest_request(
+        self,
+        route: str,
+        body: Any = None,
+        *,
+        method: str = "POST",
+        headers: Mapping[str, str] | None = None,
+    ) -> urllib.request.Request:
+        route = "/" + route.lstrip("/")
+        payload = None if body is None else _json_bytes(body)
+        request_headers = {"Accept": "application/json"}
+        if payload is not None:
+            request_headers["Content-Type"] = "application/json"
+        request_headers.update(headers or {})
+        return urllib.request.Request(
+            f"{self.base_url}/rest_api{route}",
+            data=payload,
+            headers=request_headers,
+            method=method,
+        )
+
     def rest_raw(
         self,
         route: str,
@@ -344,17 +365,7 @@ class E64LocalAPI:
         timeout: float | None = None,
     ) -> RestResponse:
         route = "/" + route.lstrip("/")
-        payload = None if body is None else _json_bytes(body)
-        request_headers = {"Accept": "application/json"}
-        if payload is not None:
-            request_headers["Content-Type"] = "application/json"
-        request_headers.update(headers or {})
-        request = urllib.request.Request(
-            f"{self.base_url}/rest_api{route}",
-            data=payload,
-            headers=request_headers,
-            method=method,
-        )
+        request = self._rest_request(route, body, method=method, headers=headers)
         try:
             with self._opener.open(request, timeout=timeout or self.timeout) as response:
                 return RestResponse(
@@ -367,6 +378,49 @@ class E64LocalAPI:
             raise E64WSAPIError(f"REST {route} returned HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
             raise E64WSAPIError(f"local REST request failed for {route}: {exc.reason}") from exc
+
+    def rest_probe(
+        self,
+        route: str,
+        body: Any = None,
+        *,
+        method: str = "POST",
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> RestResponse | None:
+        """Return the response for any HTTP status, or ``None`` when none came.
+
+        ``rest_raw`` raises on an HTTP error because its callers want a result,
+        not a refused call.  A probe is the opposite: the status *is* the
+        observation.  The local API answers ``403`` at its dev gate, ``404``
+        from a vendor dispatcher that does not know the route, ``401`` at the
+        owner-token check and ``503`` when the action runner cannot start, and
+        a caller that cannot tell those apart cannot say what a device allows
+        (``docs/UNLOCK_TIERS.md`` §4).
+
+        ``None`` means no HTTP response came back at all — refused connection,
+        TLS failure or timeout.  That is deliberately not the same observation
+        as a response carrying an error status, and callers must not collapse
+        the two.
+        """
+        route = "/" + route.lstrip("/")
+        request = self._rest_request(route, body, method=method, headers=headers)
+        try:
+            with self._opener.open(request, timeout=timeout or self.timeout) as response:
+                return RestResponse(
+                    response.status,
+                    {str(k): str(v) for k, v in response.headers.items()},
+                    response.read(),
+                )
+        except urllib.error.HTTPError as exc:
+            # An error status is still an answer: keep the code and the body.
+            return RestResponse(
+                exc.code,
+                {str(k): str(v) for k, v in (exc.headers or {}).items()},
+                exc.read(),
+            )
+        except (urllib.error.URLError, OSError):
+            return None
 
     @staticmethod
     def _decode(response: RestResponse) -> Any:

@@ -143,7 +143,6 @@ internal class LoopbackTlsBridge private constructor(
     val fingerprint: String get() = tls.fingerprint
 
     private fun handle(exchange: HttpExchange) {
-        var entry: WireLog.Entry? = null
         try {
             val requestBody = exchange.requestBody.use { it.readBytes() }.toString(Charsets.UTF_8)
             val requestHeaders = LinkedHashMap<String, String>()
@@ -181,17 +180,30 @@ internal class LoopbackTlsBridge private constructor(
                     exchange.responseHeaders.add(name, value)
                 }
             }
-            respond(exchange, answer.status, answer.body)
-            entry = WireLog.Entry(
-                method = exchange.requestMethod,
-                path = path,
-                requestHeaders = requestHeaders,
-                requestBody = requestBody,
-                status = answer.status,
-                responseBody = answer.body,
+            // Record before responding, in the same step that builds the
+            // answer. Every check of the suite reads this log once its call has
+            // returned, so the entry must be in it by the time any client can
+            // see the answer. Appending after `respond()` - which is what the
+            // `finally` used to do, once the body was already flushed - left the
+            // caller racing this handler thread: it could receive a served
+            // answer whose entry had not been written yet, and report "the
+            // request did not cross the loopback bridge" for a request that did.
+            //
+            // Fields and their order are unchanged, so every assertion that
+            // reads an entry keeps its meaning, and the entry is built from the
+            // very [RawHttp.Answer] that is sent next.
+            exchanges.add(
+                WireLog.Entry(
+                    method = exchange.requestMethod,
+                    path = path,
+                    requestHeaders = requestHeaders,
+                    requestBody = requestBody,
+                    status = answer.status,
+                    responseBody = answer.body,
+                ),
             )
+            respond(exchange, answer.status, answer.body)
         } finally {
-            entry?.let { exchanges.add(it) }
             try {
                 exchange.close()
             } catch (_: Throwable) {

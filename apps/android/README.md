@@ -25,10 +25,13 @@ cd apps/android
 ./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-- `minSdk 26`, `targetSdk 36`, `compileSdk 37` (minor release 37.2).
-- `compileSdkMinor = 2` is required by the Compose 1.13 artifacts currently
-  resolved by the Compose BOM, whose AAR metadata demands API 37.1 or later;
-  the runtime target stays 36.
+- `minSdk 26`, `targetSdk 36`, `compileSdk 37.2`.
+- `compileSdk 37.2` is required by the Compose 1.13.0 / Lifecycle 2.11
+  artifacts resolved by Compose BOM 2026.11.01: their AAR metadata asks for
+  Android 37.1 or later. AGP names a minor release with `compileSdkMinor`, and
+  the platform package is `platforms;android-37.2`. Compiling against a newer
+  platform and opting in to new runtime behaviour are separate steps, so
+  `targetSdk` stays at 36.
 - Kotlin DSL, Jetpack Compose, no third-party networking library
   (`HttpURLConnection` and a small cookie jar), no analytics or crash SDK.
 - The JVM tests never need an emulator. `org.json` is supplied to the test
@@ -322,39 +325,53 @@ pinned TLS client), not out of a stub.
   of a `401`, so the app reports `empty response from device` even though the
   device explained itself (the suite asserts both sides and records a note).
   This is a property of the production stack, left unchanged here.
-- **The Compose screens.** The instrumented test below has never run.
+- **The Compose screens beyond one run.** The instrumented test below covers
+  one screen on one AVD at one API level (35, arm64) and one locale, by hand;
+  it is not a CI gate.
 - **A real certificate.** The pinned certificate is one the suite generated with
   `keytool`; the vendor's self-signed certificate was not available.
 
-## Instrumented UI test (unrun)
+## Instrumented UI test
 
 `app/src/androidTest/java/de/mahlkoenig/e64local/ActionsE2E.kt` runs the same
 flow through the real Compose UI on an emulator: it writes the device settings
 the setup wizard would write (pin, token, password, active endpoint), opens the
 Actions tab, asserts the gate and the destructive policy, taps
 `action_language_set`, types its parameters, prepares, confirms, waits for the
-terminal state, refreshes the status, loads the audit page, discards a second
-confirmation (the app's local cancel: the token is dropped and nothing runs), and
-asserts that the destructive route is shown with its refusal and a disabled
-prepare button. It then drains this process's logcat and fails on any 64-hex
-value.
+terminal state of *this run's* action on its own status card, refreshes that
+card's status, loads the audit page, discards a second confirmation (the app's
+local cancel: the token is dropped and nothing runs), and asserts that the
+destructive route is shown with its refusal and a disabled prepare button. It
+then drains this process's logcat and fails on any 64-hex value.
 
-**It has never been run.** No emulator was available. It does compile
-(`./gradlew :app:compileDebugAndroidTestKotlin`), and it is skipped - not failed -
-unless the instrumentation arguments name a simulator:
+**It runs, and it is green.** `OK (1 test)` on an arm64 API 35 AVD, twice in a
+row against the same simulator instance; the same command pointed at a port with
+nothing behind it fails at the gate assertion after 30 s. The run needs the
+test-only TLS terminator in front of the simulator - the app is TLS-only and pins
+the leaf certificate, and the simulator serves no `/login.php` - so
+[`E2E_EMULATOR.md`](E2E_EMULATOR.md) is the recipe, its "Two runs per simulator"
+section says what the second run established, and this paragraph only says what
+the test covers. It is not part of CI (`.github/workflows/apps.yml` runs the JVM
+suite only), and it is skipped - not failed - unless the instrumentation
+arguments name a simulator:
 
 ```bash
 python3 tools/e64ws_simulator.py --http-port 18787 --port 19997 --scale-port 18765 \
-    --enable-actions --http-tls-cert .tools/e2e.crt --http-tls-key .tools/e2e.key
+    --enable-actions --api-token sim-local-api-token \
+    --http-tls-cert .tools/e2e.crt --http-tls-key .tools/e2e.key
+python3 apps/android/e2e/device_terminator.py --listen-port 18788 \
+    --cert .tools/e2e.crt --key .tools/e2e.key --upstream-port 18787 \
+    --accept-token "$(openssl rand -hex 32)"          # -> e2eToken
 openssl x509 -in .tools/e2e.crt -noout -fingerprint -sha256     # -> e2eCertSha256
 
-ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:connectedDebugAndroidTest \
-    -Pandroid.testInstrumentationRunnerArguments.class=de.mahlkoenig.e64local.ActionsE2E \
-    -Pandroid.testInstrumentationRunnerArguments.e2ePort=18787 \
-    -Pandroid.testInstrumentationRunnerArguments.e2eCertSha256=<hex from the command above>
+adb -s emulator-5554 shell am instrument -w \
+    -e class de.mahlkoenig.e64local.ActionsE2E \
+    -e e2ePort 18788 -e e2eToken <the 64-hex token from the terminator> \
+    -e e2ePassword sim-password -e e2eCertSha256 <the fingerprint from above> \
+    de.mahlkoenig.e64local.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 `10.0.2.2` (the emulator's alias for the host loopback) is the default host, and
 the simulator must serve its REST API over TLS for the app's TLS-only client.
-Treat every assertion in that file as unverified until an emulator run replaces
-this paragraph.
+`am instrument -w` exits `0` even when the test fails: read the summary line
+(`OK (1 test)` / `FAILURES!!!`), not the exit status.

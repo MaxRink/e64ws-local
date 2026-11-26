@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import unittest
+import unittest.mock
 import urllib.error
 import urllib.request
-import unittest
 
 try:
+    from . import e64ws_simulator as simulator
     from .e64local_actions import ActionError
     from .e64ws_simulator import (
         SYNTHETIC_APK_NETWORK_SCHEMA,
@@ -23,6 +27,7 @@ try:
         _http_server,
     )
 except ImportError:
+    import e64ws_simulator as simulator
     from e64local_actions import ActionError
     from e64ws_simulator import (
         SYNTHETIC_APK_NETWORK_SCHEMA,
@@ -439,6 +444,174 @@ class ActionGateFixtureTest(unittest.TestCase):
         self.assertFalse(closed.actions.destructive_enabled)
         opened = SimulatedLocalApi(actions_enabled=True, destructive_enabled=True)
         self.assertTrue(opened.actions.destructive_enabled)
+
+
+#: Every optional fixture fallback this module documents.  The tests below own
+#: the environment: they clear these names, then put back what was there.
+E64_SIM_VARIABLES = (
+    "E64_SIM_REST_PASSWORD",
+    "E64_SIM_SERIAL",
+    "E64_SIM_GRINDER_TYPE",
+    "E64_SIM_WIFI_SSID",
+    "E64_SIM_WIFI_STA_PASSWORD",
+    "E64_SIM_WIFI_PRODUCTION_PASSWORD",
+    "E64_SIM_ROLE_LOGIN_DATA",
+)
+
+
+class FixtureEnvFallbackTest(unittest.TestCase):
+    """The ``E64_SIM_*`` fallbacks are opt-in and must never move a default.
+
+    Three directions per value, because each can regress alone: unset keeps the
+    documented default, set replaces it, and an explicit value (which is what
+    every CLI flag becomes) beats both.  The first test is the contract: with
+    the environment clear the fixture is the one the source documents, so no
+    existing reader, suite or capture can be affected by this feature.
+    """
+
+    def setUp(self) -> None:
+        saved = {name: os.environ.get(name) for name in E64_SIM_VARIABLES}
+        for name in E64_SIM_VARIABLES:
+            os.environ.pop(name, None)
+
+        def restore() -> None:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+        self.addCleanup(restore)
+
+    def test_the_environment_clear_leaves_every_documented_default(self) -> None:
+        # Instantiated twice: a default mutated in place would leak into the second.
+        first, second = SimulatedLocalApi(), SimulatedLocalApi()
+        for api in (first, second):
+            self.assertEqual(api.serial, "SIM0000000001")
+            self.assertEqual(api.grinder_type, 5)
+            self.assertEqual(api.token, "sim-local-api-token")
+            self.assertEqual(api.settings["Wifi.StaPassword"], "sim-wifi-secret")
+            self.assertEqual(api.settings["productionWifiSsid"], "factory-net")
+            self.assertEqual(api.settings["Role.Owner.LoginData"], "should-not-appear")
+            self.assertEqual(api.settings["Role.Technician.LoginData"], "should-not-appear")
+            self.assertEqual(api.settings["Role.Barista.LoginData"], "should-not-appear")
+            self.assertEqual(api.settings["M2m.CoffeeMachinesConfig"], "should-not-appear")
+            self.assertEqual(api.settings["System.Language"], "en_US")
+            self.assertEqual(api.config["grinderSn"], "SIM0000000001")
+            self.assertEqual(api.config["grinderType"], 5)
+            self.assertEqual(api.config["productionWifiSsid"], "factory-net")
+            self.assertEqual(api.config["productionWifiPassword"], "factory-secret")
+            self.assertEqual(api.config["cloudBaseUrl"], "https://example.com")
+        self.assertIsNot(first.settings, second.settings)
+        self.assertIsNot(first.config, second.config)
+        self.assertEqual(SimulatedAuth("fixture-token").password, "sim-password")
+
+    def test_an_empty_variable_is_the_same_as_unset(self) -> None:
+        os.environ["E64_SIM_REST_PASSWORD"] = ""
+        os.environ["E64_SIM_SERIAL"] = ""
+        os.environ["E64_SIM_WIFI_STA_PASSWORD"] = ""
+        self.assertEqual(SimulatedAuth("fixture-token").password, "sim-password")
+        api = SimulatedLocalApi()
+        self.assertEqual(api.serial, "SIM0000000001")
+        self.assertEqual(api.settings["Wifi.StaPassword"], "sim-wifi-secret")
+
+    def test_the_rest_password_falls_back_to_the_environment(self) -> None:
+        os.environ["E64_SIM_REST_PASSWORD"] = "env-only-password"
+        auth = SimulatedAuth("fixture-token")
+        self.assertEqual(auth.password, "env-only-password")
+        self.assertTrue(auth.login("Owner", "env-only-password")["success"])
+        with self.assertRaises(ValueError):
+            SimulatedAuth("fixture-token").login("Owner", "sim-password")
+
+    def test_the_serial_and_grinder_type_fall_back_to_the_environment(self) -> None:
+        os.environ["E64_SIM_SERIAL"] = "ENV0000000042"
+        os.environ["E64_SIM_GRINDER_TYPE"] = "2"
+        api = SimulatedLocalApi()
+        self.assertEqual(api.serial, "ENV0000000042")
+        self.assertEqual(api.grinder_type, 2)
+        # The two documents describe one machine, so they move together.
+        self.assertEqual(api.config["grinderSn"], "ENV0000000042")
+        self.assertEqual(api.config["grinderType"], 2)
+        machine = api.machine(SimulatedGrinder())
+        self.assertEqual(machine["grinderType"], 2)
+        self.assertEqual(machine["grinderTypeName"], "E65W GbS")
+        self.assertTrue(machine["serialPresent"])
+        self.assertEqual(
+            machine["serialSha256"], hashlib.sha256(b"ENV0000000042").hexdigest()
+        )
+
+    def test_the_credential_rows_fall_back_to_the_environment(self) -> None:
+        os.environ["E64_SIM_WIFI_SSID"] = "env-net"
+        os.environ["E64_SIM_WIFI_STA_PASSWORD"] = "env-sta-psk"
+        os.environ["E64_SIM_WIFI_PRODUCTION_PASSWORD"] = "env-prod-password"
+        os.environ["E64_SIM_ROLE_LOGIN_DATA"] = "env-login-data"
+        api = SimulatedLocalApi()
+        self.assertEqual(api.settings["Wifi.StaPassword"], "env-sta-psk")
+        self.assertEqual(api.settings["productionWifiSsid"], "env-net")
+        for role in ("Owner", "Technician", "Barista"):
+            self.assertEqual(api.settings[f"Role.{role}.LoginData"], "env-login-data")
+        self.assertEqual(api.config["productionWifiSsid"], "env-net")
+        self.assertEqual(api.config["productionWifiPassword"], "env-prod-password")
+        # Rows that are not credentials keep their fixture values.
+        self.assertEqual(api.settings["M2m.CoffeeMachinesConfig"], "should-not-appear")
+        self.assertEqual(api.settings["System.Language"], "en_US")
+
+    def test_an_explicit_value_beats_the_environment(self) -> None:
+        os.environ["E64_SIM_REST_PASSWORD"] = "env-only-password"
+        os.environ["E64_SIM_SERIAL"] = "ENV0000000042"
+        os.environ["E64_SIM_GRINDER_TYPE"] = "2"
+        os.environ["E64_SIM_WIFI_STA_PASSWORD"] = "env-sta-psk"
+        self.assertEqual(SimulatedAuth("fixture-token", password="explicit").password, "explicit")
+        api = SimulatedLocalApi(
+            serial="CLI0000000007",
+            grinder_type=1,
+            settings={"Wifi.StaPassword": "explicit"},
+        )
+        self.assertEqual(api.serial, "CLI0000000007")
+        self.assertEqual(api.grinder_type, 1)
+        self.assertEqual(api.settings["Wifi.StaPassword"], "explicit")
+        self.assertEqual(api.config["grinderSn"], "CLI0000000007")
+        self.assertEqual(api.config["grinderType"], 1)
+
+    def test_the_cli_flags_still_beat_the_environment(self) -> None:
+        """``main`` builds the fixture from flags.
+
+        A flag must win over the environment for the field it names, and the
+        environment must fill only what no flag covers.
+        """
+        os.environ["E64_SIM_REST_PASSWORD"] = "env-only-password"
+        captured: dict[str, object] = {}
+
+        class FakeHttp:
+            def shutdown(self) -> None:
+                return None
+
+            def server_close(self) -> None:
+                return None
+
+        def fake_http_server(host, port, grinder, scale, auth, *_args, **kwargs):
+            captured["auth"] = auth
+            captured["api_token"] = kwargs.get("api_token")
+            return FakeHttp()
+
+        async def fake_run_servers(_args, _grinder, _scale):
+            return None
+
+        with unittest.mock.patch.object(simulator, "_http_server", fake_http_server), \
+                unittest.mock.patch.object(simulator, "_run_servers", fake_run_servers):
+            code = simulator.main(
+                ["--token", "cli-wss-token", "--api-token", "cli-api-token"]
+            )
+        self.assertEqual(code, 0)
+        auth = captured["auth"]
+        self.assertEqual(auth.wss_token, "cli-wss-token")
+        self.assertEqual(auth.password, "env-only-password")
+        self.assertEqual(captured["api_token"], "cli-api-token")
+
+    def test_a_bad_grinder_type_fails_loudly_only_when_set(self) -> None:
+        os.environ["E64_SIM_GRINDER_TYPE"] = "not-a-number"
+        with self.assertRaisesRegex(ValueError, "E64_SIM_GRINDER_TYPE"):
+            SimulatedLocalApi()
 
 
 if __name__ == "__main__":

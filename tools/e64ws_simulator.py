@@ -17,6 +17,12 @@ a fixture REST session API. The REST password is ``sim-password`` and is
 accepted only by this loopback test server. It also exposes an explicitly
 synthetic APK-provisioning fixture at ``/api/v2/network``; that surface is
 not recovered firmware REST behavior and never contacts a real network.
+
+Nothing here has to be configured.  A handful of fixture defaults that the CLI
+does not expose—the REST password, the serial number, the grinder type and the
+fake credential rows—also read an optional ``E64_SIM_*`` variable (see
+``SETTINGS_ENV_FALLBACKS`` and docs/HOTPATCH_SURFACE.md).  Unset means the
+value documented here; an explicit argument always wins.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ import csv
 import hmac
 import io
 import json
+import os
 import re
 import mimetypes
 import ssl
@@ -52,6 +59,8 @@ try:
         BOUNDARY_RE,
         CREDENTIAL_RE,
     )
+    from .unlock_tiers import detect as detect_unlock_tier
+    from .unlock_tiers import facts_from_capabilities
 except ImportError:  # direct ``python tools/e64ws_simulator.py`` or top-level import
     from e64local_actions import (  # type: ignore[no-redef]
         ACTION_CATALOG,
@@ -61,6 +70,8 @@ except ImportError:  # direct ``python tools/e64ws_simulator.py`` or top-level i
         BOUNDARY_RE,
         CREDENTIAL_RE,
     )
+    from unlock_tiers import detect as detect_unlock_tier  # type: ignore[no-redef]
+    from unlock_tiers import facts_from_capabilities  # type: ignore[no-redef]
 
 
 ACTION_SUFFIXES = frozenset(
@@ -139,6 +150,65 @@ SYNTHETIC_APK_NETWORKS: tuple[dict[str, Any], ...] = (
         "security": "OPEN",
     },
 )
+
+
+# ---------------------------------------------------------------------------
+# Optional fixture overrides (``E64_SIM_*``)
+#
+# The values below are the documented fixture defaults and stay authoritative:
+# every variable here is opt-in, unset *or empty* keeps the constant, and a
+# value passed to the constructor (which is what every CLI flag does) wins over
+# the environment.  Nothing is read at import time, so importing this module
+# cannot fail and cannot freeze a value from the launching shell.
+# ---------------------------------------------------------------------------
+
+#: Prefix for every fixture fallback in this module.
+E64_SIM_ENV_PREFIX = "E64_SIM_"
+
+#: ``$E64_SIM_REST_PASSWORD`` — the REST fixture password (``SimulatedAuth``).
+DEFAULT_REST_PASSWORD = "sim-password"
+#: ``$E64_SIM_SERIAL`` — ``SimulatedLocalApi.serial`` and ``config.grinderSn``.
+DEFAULT_SERIAL = "SIM0000000001"
+#: ``$E64_SIM_GRINDER_TYPE`` — ``grinder_type`` in ``/machine`` and ``/config``.
+DEFAULT_GRINDER_TYPE = 5
+#: ``$E64_SIM_WIFI_SSID`` — the fake production SSID in settings and config.
+DEFAULT_WIFI_SSID = "factory-net"
+#: ``$E64_SIM_WIFI_STA_PASSWORD`` — the fake ``Wifi.StaPassword`` settings row.
+DEFAULT_WIFI_STA_PASSWORD = "sim-wifi-secret"
+#: ``$E64_SIM_WIFI_PRODUCTION_PASSWORD`` — the fake config credential.
+DEFAULT_WIFI_PRODUCTION_PASSWORD = "factory-secret"
+#: ``$E64_SIM_ROLE_LOGIN_DATA`` — the fake ``Role.*.LoginData`` settings rows.
+DEFAULT_ROLE_LOGIN_DATA = "should-not-appear"
+
+#: Settings rows whose fixture value is a fake credential, with the optional
+#: fallback that replaces it: (exact row names, env suffix, default).
+SETTINGS_ENV_FALLBACKS: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("Wifi.StaPassword",), "WIFI_STA_PASSWORD", DEFAULT_WIFI_STA_PASSWORD),
+    (("productionWifiSsid",), "WIFI_SSID", DEFAULT_WIFI_SSID),
+    (
+        ("Role.Owner.LoginData", "Role.Technician.LoginData", "Role.Barista.LoginData"),
+        "ROLE_LOGIN_DATA",
+        DEFAULT_ROLE_LOGIN_DATA,
+    ),
+)
+
+#: ``config`` rows with the same treatment: (key, env suffix, default).
+#: ``grinderSn`` and ``grinderType`` are not listed: they follow ``serial`` and
+#: ``grinder_type`` so the two documents can never disagree.
+CONFIG_ENV_FALLBACKS: tuple[tuple[str, str, str], ...] = (
+    ("productionWifiSsid", "WIFI_SSID", DEFAULT_WIFI_SSID),
+    ("productionWifiPassword", "WIFI_PRODUCTION_PASSWORD", DEFAULT_WIFI_PRODUCTION_PASSWORD),
+)
+
+
+def _env_fallback(suffix: str) -> str | None:
+    """Return ``$E64_SIM_<suffix>``, or ``None`` when unset or empty.
+
+    Read at call time on purpose: the fallback must describe the environment of
+    the process that instantiates the fixture, not of the import.
+    """
+    value = os.environ.get(E64_SIM_ENV_PREFIX + suffix)
+    return value if value not in (None, "") else None
 
 
 def _number(value: Any, field: str) -> float:
@@ -251,7 +321,7 @@ class SimulatedAuth:
     """
 
     wss_token: str
-    password: str = "sim-password"
+    password: str = DEFAULT_REST_PASSWORD
     fw01_login: bool = False
     session_ttl_seconds: float = 900.0
     generation: int = 0
@@ -260,6 +330,12 @@ class SimulatedAuth:
     cookie: str | None = None
     expires_at: float = 0.0
     sessions: dict[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Opt-in only: an explicit ``password`` wins, and with nothing set the
+        # value is exactly ``DEFAULT_REST_PASSWORD``.
+        if self.password == DEFAULT_REST_PASSWORD:
+            self.password = _env_fallback("REST_PASSWORD") or DEFAULT_REST_PASSWORD
 
     def login(self, role: Any, password: Any) -> dict[str, Any]:
         injected = FW01_ROLE.match(role) if self.fw01_login and isinstance(role, str) else None
@@ -570,19 +646,19 @@ class SimulatedLocalApi:
 
     token: str = "sim-local-api-token"
     ws_tokens: set[str] = field(default_factory=set)
-    serial: str = "SIM0000000001"
+    serial: str = DEFAULT_SERIAL
     variant: str = "Hsg"
-    grinder_type: int = 5
+    grinder_type: int = DEFAULT_GRINDER_TYPE
     grinder_sub_type: int = 0
     settings: dict[str, str] = field(default_factory=lambda: {
         "System.Language": "en_US",
         "Standby.ActivationTimeSec": "600",
-        "Role.Owner.LoginData": "should-not-appear",
-        "Role.Technician.LoginData": "should-not-appear",
-        "Role.Barista.LoginData": "should-not-appear",
-        "Wifi.StaPassword": "sim-wifi-secret",
+        "Role.Owner.LoginData": DEFAULT_ROLE_LOGIN_DATA,
+        "Role.Technician.LoginData": DEFAULT_ROLE_LOGIN_DATA,
+        "Role.Barista.LoginData": DEFAULT_ROLE_LOGIN_DATA,
+        "Wifi.StaPassword": DEFAULT_WIFI_STA_PASSWORD,
         "M2m.CoffeeMachinesConfig": "should-not-appear",
-        "productionWifiSsid": "factory-net",
+        "productionWifiSsid": DEFAULT_WIFI_SSID,
         "Cloud.ConnectionEnabled": "true",
         "Grinding.OvershootWeight": "536960",
     })
@@ -594,10 +670,10 @@ class SimulatedLocalApi:
     ])
     config: dict[str, Any] = field(default_factory=lambda: {
         "configVersion": 1,
-        "grinderType": 5,
-        "grinderSn": "SIM0000000001",
-        "productionWifiSsid": "factory-net",
-        "productionWifiPassword": "factory-secret",
+        "grinderType": DEFAULT_GRINDER_TYPE,
+        "grinderSn": DEFAULT_SERIAL,
+        "productionWifiSsid": DEFAULT_WIFI_SSID,
+        "productionWifiPassword": DEFAULT_WIFI_PRODUCTION_PASSWORD,
         "cloudBaseUrl": "https://example.com",
         "targetWeightGr": 18.0,
         "grindTimeSec": 30.0,
@@ -657,6 +733,20 @@ class SimulatedLocalApi:
     FILE_HARDLINKS: ClassVar[frozenset[str]] = frozenset({"/log/hardlink"})
     MAX_FILE_BYTES: ClassVar[int] = 1048576
 
+    #: The fixture's ``/etc/issue`` first line on a dev image: token 0 is
+    #: ``development`` and the line has exactly 14 tokens, so the vendor
+    #: 14-token gate is open.  Kept as a literal so a test can point at it.
+    ISSUE_LINE: ClassVar[str] = (
+        "development image, VERSION: HEM-HSG.140-git-g273ab65 "
+        "(built through jenkins@36a955b69793 on Tue, 23 Jun 2026 11:02:11 +0000)"
+    )
+    #: The same line as the shipped image writes it: 14 tokens, token 0
+    #: ``custom``, so ``isDevVersion()`` is false.
+    STOCK_ISSUE_LINE: ClassVar[str] = (
+        "custom image, VERSION: HEM-HSG.140-git-g273ab65 "
+        "(built through jenkins@36a955b69793 on Tue, 23 Jun 2026 11:02:11 +0000)"
+    )
+
     #: Deterministic clock for token expiry and rate-limit tests.
     clock: Callable[[], float] = time.time
     #: Action engine (in-memory mirror of the PHP gate and protocol).
@@ -666,14 +756,65 @@ class SimulatedLocalApi:
     actions_enabled: bool = False
     #: Open the destructive gate.  Requires actions_enabled.
     destructive_enabled: bool = False
+    #: Mirror of ``--dev-gate open|locked``.  A locked fixture is a shipped
+    #: image: the module answers HTTP 403 at its dev gate before any route, so
+    #: ``/etc/issue`` is the stock line and the synthetic unlock tier is
+    #: ``stock``.  This is a fixture switch, not a claim about a device.
+    dev_gate_open: bool = True
+    #: Synthetic root-only facts, used only for the synthetic unlock tier.
+    #: ``None`` means "not observed", which is the honest default: this fixture
+    #: owns no SSH channel and cannot read a real ``/etc/issue``.
+    synthetic_root_channel: bool | None = None
+    #: Synthetic sudoers fact for the synthetic unlock tier.
+    synthetic_sudoers: bool | None = None
+    #: Synthetic "an action_* route answered with the owner token" fact for the
+    #: synthetic unlock tier.  ``None`` means this fixture has not served one.
+    synthetic_action_answered: bool | None = None
 
     #: Mirrors $E64LOCAL_ACTION_META_ROUTES in ondevice/rest_api_dev.php.
     ACTION_ROUTES: ClassVar[tuple[str, ...]] = ACTION_META_ROUTES
 
     def __post_init__(self) -> None:
+        self._apply_env_fallbacks()
         self.actions = ActionEngine(self.settings, self.portafilters, clock=self.clock)
         self.actions.enabled = self.actions_enabled
         self.actions.destructive_enabled = self.destructive_enabled and self.actions_enabled
+
+    def _apply_env_fallbacks(self) -> None:
+        """Overlay the optional ``E64_SIM_*`` values on unchanged fixture defaults.
+
+        Runs before the action engine is built, so a written settings row is the
+        row every later read sees.  A field that an explicit constructor
+        argument already changed is left alone, and with nothing set in the
+        environment every branch is a no-op.
+        """
+        if self.serial == DEFAULT_SERIAL:
+            self.serial = _env_fallback("SERIAL") or DEFAULT_SERIAL
+        if self.grinder_type == DEFAULT_GRINDER_TYPE:
+            raw_type = _env_fallback("GRINDER_TYPE")
+            if raw_type is not None:
+                try:
+                    self.grinder_type = int(raw_type, 10)
+                except ValueError:
+                    raise ValueError(
+                        f"${E64_SIM_ENV_PREFIX}GRINDER_TYPE must be an integer, got {raw_type!r}"
+                    ) from None
+        for keys, suffix, default in SETTINGS_ENV_FALLBACKS:
+            value = _env_fallback(suffix)
+            if value is None:
+                continue
+            for key in keys:
+                if self.settings.get(key) == default:
+                    self.settings[key] = value
+        for key, suffix, default in CONFIG_ENV_FALLBACKS:
+            value = _env_fallback(suffix)
+            if value is not None and self.config.get(key) == default:
+                self.config[key] = value
+        # The two documents describe one machine, so they are updated together.
+        if self.config.get("grinderSn") == DEFAULT_SERIAL:
+            self.config["grinderSn"] = self.serial
+        if self.config.get("grinderType") == DEFAULT_GRINDER_TYPE:
+            self.config["grinderType"] = self.grinder_type
 
     def accepts(self, headers: Mapping[str, str], body: Mapping[str, Any] | None) -> bool:
         headers = {str(key).lower(): value for key, value in headers.items()}
@@ -850,6 +991,14 @@ class SimulatedLocalApi:
         ]
 
     def capabilities(self) -> dict[str, Any]:
+        document = self._capabilities_document()
+        # Additive and clearly synthetic: no field of the real module's
+        # document changes shape, and a client that does not know this key
+        # ignores it.  See docs/UNLOCK_TIERS.md.
+        document["syntheticUnlockTier"] = self.synthetic_unlock_tier(document)
+        return document
+
+    def _capabilities_document(self) -> dict[str, Any]:
         actions = self.actions.capabilities()
         routes = list(self.ROUTES)
         if actions["enabled"]:
@@ -883,6 +1032,46 @@ class SimulatedLocalApi:
             "devMode": True,
         }
 
+    def issue_text(self) -> str:
+        """The fixture's ``/etc/issue`` first line, after the module's redaction."""
+        line = self.ISSUE_LINE if self.dev_gate_open else self.STOCK_ISSUE_LINE
+        return self.redact_text(line)
+
+    def synthetic_unlock_facts(self, document: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """The facts this fixture can honestly offer about its own unlock tier.
+
+        The API half comes from the capabilities document itself, through the
+        same mapping a client uses.  The root half comes from the fixture's own
+        switches, and ``None`` stays ``None``: "this fixture owns no SSH
+        channel" is not the same observation as "a channel refused".
+        """
+        if not self.dev_gate_open:
+            # A locked fixture never serves this document: the dev gate answers
+            # 403 first.  Reporting the 403 is the honest fact set.
+            facts: dict[str, Any] = {
+                "api": {"reached": True, "status": 403, "error_code": 403}
+            }
+        else:
+            facts = facts_from_capabilities(
+                document if document is not None else self._capabilities_document(),
+                status=200,
+            )
+            if self.synthetic_sudoers is not None:
+                facts["api"]["sudoers"] = self.synthetic_sudoers
+            elif self.actions_enabled:
+                # ``e64root api deploy --enable-actions`` writes the policy file
+                # and the runner's sudoers rule in one step (LOCAL_API.md §12.2),
+                # so an opened fixture gate implies the rule is there.
+                facts["api"]["sudoers"] = True
+            if self.synthetic_action_answered is not None:
+                facts["api"]["action_answered"] = self.synthetic_action_answered
+        facts["root"] = {"channel": self.synthetic_root_channel, "issue": self.issue_text()}
+        return facts
+
+    def synthetic_unlock_tier(self, document: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """``{tier, evidence, reasons}`` for this fixture, from tools/unlock_tiers.py."""
+        return detect_unlock_tier(self.synthetic_unlock_facts(document))
+
     def machine(self, grinder: "SimulatedGrinder") -> dict[str, Any]:
         model = self.GRINDER_TYPE_NAMES.get(self.grinder_type, "unknown")
         return {
@@ -900,28 +1089,24 @@ class SimulatedLocalApi:
             "serialNote": "the raw serial number is never returned by this API",
         }
 
-    @classmethod
-    def read_file(cls, path: Any) -> tuple[str, str] | None:
+    def read_file(self, path: Any) -> tuple[str, str] | None:
         """Return (encoding, content) for an allowlisted path, else None."""
         if not isinstance(path, str) or path == "" or "\x00" in path:
             return None
-        if path in cls.FILE_SYMLINKS or path in cls.FILE_HARDLINKS:
+        if path in self.FILE_SYMLINKS or path in self.FILE_HARDLINKS:
             return None
-        if path in cls.FILE_ALLOWLIST:
+        if path in self.FILE_ALLOWLIST:
             if path == "/etc/issue":
-                return ("text", cls.redact_text(
-                    "development image, VERSION: HEM-HSG.140-git-g273ab65 "
-                    "(built through jenkins@36a955b69793 on Tue, 23 Jun 2026 11:02:11 +0000)"
-                ))
+                return ("text", self.issue_text())
             return ("text", '{"state":"Idle"}')
         components = path.split("/")
         if components[0] != "" or len(components) < 3:
             return None
-        if components[1] not in {allowed.strip("/") for allowed in cls.FILE_ALLOWED_DIRS}:
+        if components[1] not in {allowed.strip("/") for allowed in self.FILE_ALLOWED_DIRS}:
             return None
         if any(part in ("", ".", "..") for part in components[2:]):
             return None
-        return ("text", cls.redact_text(cls.LOG_FILE_CONTENT))
+        return ("text", self.redact_text(self.LOG_FILE_CONTENT))
 
 
 @dataclass
@@ -1846,6 +2031,10 @@ def _http_server(
             token=api_token or "sim-local-api-token",
             actions_enabled=actions_enabled,
             destructive_enabled=destructive_enabled,
+            # The fixture's dev gate and the local API's own gate are the same
+            # device state: with --dev-gate locked the module answers 403, so
+            # the synthetic unlock tier must be stock, not dev.
+            dev_gate_open=grinder.dev_mode,
         ),
     )
     thread = threading.Thread(target=server.serve_forever, name="e64-sim-http", daemon=True)

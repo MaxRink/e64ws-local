@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[3]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from tools.required_inputs import skip_without  # noqa: E402  (reached via REPO above)
 
 from harness import Harness  # noqa: F401  (sys.path setup)
 from e64ctl.assumptions import LIVE_LOAD_CELL, raw_to_grams
@@ -56,6 +63,7 @@ class LiveProfileShapeTests(unittest.TestCase):
             msg="live coefficients must differ from the fixture constants")
 
     def test_profile_matches_committed_evidence(self):
+        skip_without(["docs/evidence/live-2026-11-18/database.json"])
         evidence = (Path(__file__).resolve().parents[3] / "docs" / "evidence" /
                     "live-2026-11-18" / "database.json")
         values = json.loads(evidence.read_text())["settings"]["values"]
@@ -113,6 +121,7 @@ class LiveProfileStateTests(unittest.TestCase):
                          "0.600000g")
 
     def test_live_state_matches_captured_driver_state(self):
+        skip_without(["docs/evidence/live-2026-11-18/wss-reads.json"])
         evidence = (Path(__file__).resolve().parents[3] / "docs" / "evidence" /
                     "live-2026-11-18" / "wss-reads.json")
         captured = json.loads(evidence.read_text())["reads"][
@@ -144,6 +153,7 @@ class LiveProfileStateTests(unittest.TestCase):
                 self.assertEqual(live[key], expected, key)
 
     def test_live_driver_config_has_the_full_captured_field_set(self):
+        skip_without(["docs/evidence/live-2026-11-18/wss-reads.json"])
         evidence = (Path(__file__).resolve().parents[3] / "docs" / "evidence" /
                     "live-2026-11-18" / "wss-reads.json")
         captured = json.loads(evidence.read_text())["reads"][

@@ -7,17 +7,58 @@
 # `unknown — needs capture`, so this stack is runnable but not device-ready.
 #
 # Default `docker compose up -d` starts: api, proxy (offline Caddyfile), admin.
-# Profiles:
+# Profile:
 #   device-tls   proxy-device  - the design's mTLS edge; needs certs/ + pki/
 #                                (deploy/local-cloud/gen-dev-certs.sh makes dev
 #                                material).  Unhealthy until those files exist.
-#   offline      proxy-offline - plain HTTP :8088 and `tls internal` :8443, no
-#                                certificate files, exercises the API path.
-#   postgres     db            - template only; the service serves from SQLite.
-#   object-store objects       - template only; the MinIO tag does not pull.
+#
+# The `postgres` template (`db`) is not in this file.  It lives in
+# docker-compose.templates.yml because it is the one service that must not start
+# without a credential, and the Compose required-variable form
+# (`${POSTGRES_PASSWORD:?...}`) is evaluated for every service, in every
+# profile: keeping `db` here would mean this stack could not even be parsed
+# without a database password.  Merge that file in when you want the profile:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.templates.yml \
+#     --profile postgres up -d --wait db
+#
+# `--profile postgres` *alone* is now a no-op that exits 0, and
+# `--profile postgres up -d db` says "no such service".  See README.md
+# "The postgres template moved".
+#
+# Every service here takes the shared `x-logging` anchor below: a home box fills
+# /var/lib/docker with container logs within weeks otherwise.
+#
+# There is no `offline` profile: the offline Caddyfile *is* the default `proxy`
+# service (:8088 plain, :8443 `tls internal`), so a plain `up` needs no profile.
+# `--profile offline` selects nothing and is a no-op.
+#
+# There is no `object-store` profile either: the `objects` (MinIO) template was
+# removed rather than left on a tag that cannot pull.  The community server
+# image `minio/minio` no longer exists - Docker Hub answers 404 and
+# `docker pull minio/minio:<any tag>` says "repository does not exist"; the
+# quay.io, ghcr.io and registry.min.io mirrors are gone with it, and dl.min.io
+# answers HTTP 410 Gone.  The only surviving MinIO-published server image is
+# `quay.io/minio/aistor/minio`, which is AIStor, MinIO's commercial product.
+# It does pull and it does run - it has a shell and curl, it listens on :9000,
+# and the old healthcheck below would report it healthy - but unlicensed it
+# logs
+#   WARN: No valid license found, running in offline mode.
+#         All S3 operations are denied.
+# and answers every S3 request with AccessDenied.  A service that is green and
+# refuses all work is worse than no service, and buying or accepting a licence
+# is not a decision this file should make.  See README.md "Object store".
+#
+# Every pulled image below is pinned `tag@sha256:<digest>`: the tag is for the
+# reader, the digest is what Docker resolves.  Digests were resolved from the
+# registry on 2026-11-25 with `docker buildx imagetools inspect` and confirmed
+# with `crane digest`; they are the multi-arch *index* digests, which is why
+# they differ from the per-platform digest of any single machine.  Re-check with
+# the commands in README.md "Verify image pins".
 #
 # Before the first `up`:
-#   1. cp .env.example .env   (documented placeholders; fill in a real token)
+#   1. cp .env.example .env   (the admin token ships empty on purpose; an empty
+#                              token disables the admin API instead of opening it)
 #   2. (optional, device-tls) sh gen-dev-certs.sh
 #   3. docker compose config --quiet
 #
@@ -25,6 +66,24 @@
 # which is git-ignored, and .env.example holds placeholders only.
 
 name: local-cloud
+
+# ---------------------------------------------------------------------------
+# Shared container log rotation (INF-06).
+#
+# Every service in this file and in docker-compose.templates.yml uses
+# `logging: *default-logging`.  Without it the json-file driver grows without
+# bound: both Caddy edges log one JSON line per request, so a home box ends up
+# with a full /var/lib/docker and a dead daemon.  Rotation is the driver's own,
+# so no logrotate and no extra package.
+#
+# Anchors do not cross Compose files, so the same block is repeated in
+# docker-compose.templates.yml.  Change both.
+# ---------------------------------------------------------------------------
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # ----------------------------------------------------------------------
@@ -44,6 +103,23 @@ services:
       # admin token, which then disables the admin API instead of opening it.
       - path: .env
         required: false
+    environment:
+      # The listener *inside* the container.  `.env.example` ships
+      # LOCAL_CLOUD_HOST=127.0.0.1 for a bare `python3 -m
+      # tools.local_cloud.service`, which would be unreachable from the proxy,
+      # so Compose sets the container bind here.  `environment` overrides
+      # `env_file`, so this wins over whatever `.env` says; the `internal`
+      # network publishes nothing either way.
+      LOCAL_CLOUD_HOST: "0.0.0.0"
+    # ThreadingHTTPServer spawns one thread per concurrent connection and threads
+    # count against the container's task limit, so pids_limit is in-flight device
+    # requests plus the starter threads.  The device polls one route every 5 s;
+    # 200 turns a thread leak into a failing health check instead of a dead host.
+    pids_limit: 200
+    # Stdlib Python + SQLite for ten routes: ~30 MiB resident.  256 MiB leaves
+    # room for a large export and then fails the request, not the box.
+    mem_limit: 256m
+    logging: *default-logging
     volumes:
       - apidata:/var/lib/local-cloud
     networks:
@@ -66,14 +142,25 @@ services:
   # the device edge, on :8088 (http) and :8443 (Caddy's internal CA).
   # ----------------------------------------------------------------------
   proxy:
-    image: caddy:2.11.9-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "8088:8088"
-      - "8443:8443"
+      # INF-01: loopback by default.  A LAN bind is an explicit per-command
+      # opt-in, so the file is never edited for a device test:
+      #
+      #   LOCAL_CLOUD_EDGE_BIND=0.0.0.0 docker compose up -d proxy
+      #
+      # and that opt-in is a real tradeoff, not a convenience: it publishes an
+      # unauthenticated plain-HTTP edge, plus a `tls internal` sibling whose CA
+      # nothing trusts, to every host on the segment.  Fine on a bench VLAN with
+      # a grinder; not fine on a laptop on guest Wi-Fi.  `admin` stays on
+      # 127.0.0.1 either way, and `api` is never published at all.
+      - "${LOCAL_CLOUD_EDGE_BIND:-127.0.0.1}:8088:8088"
+      - "${LOCAL_CLOUD_EDGE_BIND:-127.0.0.1}:8443:8443"
+    logging: *default-logging
     volumes:
       - ./Caddyfile.offline:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -96,14 +183,21 @@ services:
   # ----------------------------------------------------------------------
   proxy-device:
     profiles: ["device-tls"]
-    image: caddy:2.11.9-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
     ports:
+      # Deliberately on every interface, and it stays that way: the grinder has
+      # to reach this listener, so "no wildcard bind" is a statement about the
+      # *default* stack (`proxy`, `admin`), not about the mTLS edge.  What
+      # protects it is the TLS layer, not the bind address: every site in
+      # `Caddyfile` requires a verified client certificate, and there is no site
+      # on :443 without one (see the invariant at the bottom of that file).
       - "443:443"
       - "80:80"
+    logging: *default-logging
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/etc/caddy/certs:ro
@@ -121,56 +215,32 @@ services:
       start_period: 10s
 
   # ----------------------------------------------------------------------
-  # State: PostgreSQL.  Template only - the service uses SQLite today, and the
-  # design's PostgreSQL target (docs/LOCAL_CLOUD_DESIGN.md §4) is not wired.
+  # No PostgreSQL here either, on purpose.  `db` is the one service that
+  # must not start on a placeholder password, so it lives in
+  # docker-compose.templates.yml together with the required-variable form
+  # that enforces it - see the header of this file and README.md "The
+  # postgres template moved".
   # ----------------------------------------------------------------------
-  db:
-    profiles: ["postgres"]
-    image: postgres:18.7-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: "${POSTGRES_DB:-localcloud}"
-      POSTGRES_USER: "${POSTGRES_USER:-localcloud}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-replace-me}"
-      TZ: "UTC"
-    volumes:
-      # 18+ stores the cluster in a major-version subdirectory (PGDATA is
-      # /var/lib/postgresql/18/docker), so the mount has to be the parent:
-      # a mount at .../data is detected as a pre-18 leftover and the container
-      # refuses to start.  See docker-library/postgres#1259.
-      - pgdata:/var/lib/postgresql
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
 
   # ----------------------------------------------------------------------
-  # Artifacts and raw captures: S3-compatible object store.  Template only;
-  # `minio/minio` was withdrawn from Docker Hub and Quay, so it does not pull.
+  # No object store here, on purpose.  The `objects` template that used to sit
+  # at this point named `minio/minio:RELEASE.2024-08-17T01-24-54Z`, and that
+  # image cannot be pulled from anywhere: MinIO stopped publishing the
+  # community server image (Docker Hub 404, quay.io and ghcr.io mirrors gone,
+  # dl.min.io 410 Gone - see the header of this file and README.md "Object
+  # store").  A template service whose only image is unpullable is worse than
+  # no service: it made `--profile object-store up` a documented command that
+  # could not work.  The `.env` names S3_* stay for the future wiring of
+  # design §4; nothing reads them today.
+  #
+  # To re-add it, pick an image that resolves *and* whose licence you accept
+  # (today the only MinIO-published server image is the commercial
+  # `quay.io/minio/aistor/minio`, which needs a licence or it denies every S3
+  # operation), pin it `tag@sha256:<digest>` like every other image here, then
+  # restore `objects` + `objectdata` and the README rows.  Give the healthcheck
+  # an S3 call, not just /minio/health/live: the unlicensed image answers the
+  # liveness probe 200 while refusing the work.
   # ----------------------------------------------------------------------
-  objects:
-    profiles: ["object-store"]
-    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
-    restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: "${S3_ACCESS_KEY:-replace-me}"
-      MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY:-replace-me}"
-      TZ: "UTC"
-    volumes:
-      - objectdata:/data
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
 
   # ----------------------------------------------------------------------
   # Admin: owner-only static console.  Bound to loopback only and on its own
@@ -178,11 +248,22 @@ services:
   # itself lives on the `api` service and is token-gated.
   # ----------------------------------------------------------------------
   admin:
-    image: caddy:2.11.9-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: unless-stopped
     command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
     ports:
       - "127.0.0.1:8080:8080"   # loopback on the host only; no LAN listener
+    # It writes nothing: `caddy file-server` serves /srv read-only and has no
+    # storage configured, so the rootfs is read-only and every other writable
+    # path is a tmpfs that dies with the container.  /config and /data are
+    # tmpfs (not volumes) because Caddy autosaves its JSON config there on
+    # start-up and treats a write failure as non-fatal.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /config
+      - /data
+    logging: *default-logging
     volumes:
       - ./admin:/srv:ro
     networks:
@@ -203,7 +284,7 @@ networks:
 
 volumes:
   apidata:
-  pgdata:
-  objectdata:
+  # pgdata: declared in docker-compose.templates.yml, with `db`.
+  # objectdata: returns with `objects`; see the note where that service was.
   caddy_data:
   caddy_config:

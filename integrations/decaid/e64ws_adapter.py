@@ -15,6 +15,12 @@ from numbers import Real
 from time import monotonic
 from typing import Any, Mapping
 
+from integrations.decaid.unlock_tier import (
+    ActionProbe,
+    LocalObservations,
+    UnlockTierReport,
+    detect_unlock_tier,
+)
 from tools.e64ws_api import E64LocalAPI, E64WSAPIError
 from tools.gbs_model import proposed_dd_from_weight
 
@@ -134,6 +140,7 @@ class E64DecaidAdapter:
         policy: DecaidCapabilityPolicy | None = None,
         allow_actuation: bool = False,
         allow_event_injection: bool = False,
+        owner_token: str | None = None,
     ) -> None:
         self.api = api
         if policy is not None and (allow_actuation or allow_event_injection):
@@ -142,10 +149,15 @@ class E64DecaidAdapter:
             allow_actuation=allow_actuation,
             allow_event_injection=allow_event_injection,
         )
+        #: The local API owner token (``/db/e64local/token``), when the host
+        #: holds one.  It is never logged, audited or returned: the tier report
+        #: carries facts, not credentials.
+        self.owner_token = owner_token
         # Compatibility attributes for the first reference-adapter revision.
         self.allow_actuation = self.policy.allow_actuation
         self.allow_event_injection = self.policy.allow_event_injection
         self.last_brew_event: BrewEvent | None = None
+        self.last_unlock_tier: UnlockTierReport | None = None
         self._last_snapshot: GrinderSnapshot | None = None
         self._last_actuation_monotonic: float | None = None
         self._recorded_shot_ids: set[str] = set()
@@ -183,6 +195,40 @@ class E64DecaidAdapter:
         )
         self._last_snapshot = snapshot
         return snapshot
+
+    def unlock_tier(
+        self,
+        *,
+        owner_token: str | None = None,
+        local: LocalObservations | None = None,
+        action_probe: ActionProbe | None = None,
+    ) -> UnlockTierReport:
+        """Return what this device currently allows, as the detector decided it.
+
+        The verdict is ``tools/unlock_tiers.detect()``'s own document — the
+        tier, the evidence behind it, the reasons and the ``unseparated``
+        neighbour — computed from the facts this adapter could observe.
+        ``integrations/decaid/unlock_tier.py`` says which facts those are, and
+        which it refuses to invent.  Nothing here re-derives a tier: when the
+        facts do not settle the question the answer is ``unknown``, and the
+        reasons say what would settle it.
+
+        ``local`` carries the facts only a root channel can supply.
+        ``action_probe`` authorises one ``action_prepare``, which spends a
+        rate-limit slot in that route's bucket and leaves one prepared record
+        that expires; it is off by default for exactly that reason.  With
+        neither, a development image reports ``dev`` and
+        ``unseparated == ("root", "root-custom-api")``.
+        """
+        self._require("grinder.tier", self.policy.allow_read, "grinder reads are disabled")
+        report = detect_unlock_tier(
+            self.api,
+            owner_token=self.owner_token if owner_token is None else owner_token,
+            local=local,
+            action_probe=action_probe,
+        )
+        self.last_unlock_tier = report
+        return report
 
     @staticmethod
     def recommend(
@@ -387,10 +433,13 @@ class E64DecaidAdapter:
 
 
 __all__ = [
+    "ActionProbe",
     "BrewEvent",
     "DecaidAuditEntry",
     "DecaidCapabilityPolicy",
     "DialRecommendation",
     "E64DecaidAdapter",
     "GrinderSnapshot",
+    "LocalObservations",
+    "UnlockTierReport",
 ]

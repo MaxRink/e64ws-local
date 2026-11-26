@@ -12,10 +12,11 @@ val phpModuleAsset = layout.projectDirectory.file("src/main/assets/rest_api_dev.
 
 android {
     namespace = "de.mahlkoenig.e64local"
+    // The Compose 1.13.0 artifacts resolved by Compose BOM 2026.11.01 declare
+    // minCompileSdk=37 and minCompileMinorSdk=1 in their AAR metadata, so the
+    // app compiles against the android-37.2 platform, not android-37.0.
+    // compileSdkMinor keeps the minor release out of an opaque string.
     compileSdk = 37
-    // The Compose BOM now resolves Compose 1.13.x, whose AAR metadata requires
-    // compiling against API 37.1 or later; 37.2 is the current minor release.
-    // This only raises the APIs visible to the compiler - targetSdk stays 36.
     compileSdkMinor = 2
 
     defaultConfig {
@@ -77,7 +78,9 @@ android {
 // The digest is computed with MessageDigest directly inside doLast: a helper
 // function declared at script level would make the task action capture the
 // build script instance, which the configuration cache refuses to serialize.
-val verifyBundledModule by tasks.registering {
+// tasks.register(...) rather than the `by tasks.registering` property delegate:
+// Gradle 9.9 deprecates the delegate syntax and removes it in Gradle 10.
+val verifyBundledModule = tasks.register("verifyBundledModule") {
     group = "verification"
     description = "Assert the bundled PHP files match their ondevice/ copies"
     val assets = listOf(
@@ -137,10 +140,10 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.1")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
@@ -152,8 +155,8 @@ dependencies {
     testImplementation("org.json:json:20260814")
     testImplementation("junit:junit:4.13.2")
 
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

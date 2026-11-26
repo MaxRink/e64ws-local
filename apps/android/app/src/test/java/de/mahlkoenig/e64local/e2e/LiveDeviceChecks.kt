@@ -40,6 +40,11 @@ internal class LiveDeviceChecks(
             val answer = device.client.get("/rest_api/ping")
             require(answer.status == 200) { "HTTP ${answer.status}: ${answer.body.take(160)}" }
             require(answer.body.contains("\"simulator\":true")) { "the ping said ${answer.body.take(160)}" }
+            // Reading the wire log straight after the call is sound, and no
+            // waiting is needed: the bridge records an exchange before it answers
+            // it, so an answer the app holds is already in the log. The other
+            // checks below rely on the same invariant; BridgeOrderingUnitTest
+            // pins it.
             require(device.exchanges.any { it.path == "/rest_api/ping" }) {
                 "the request did not cross the loopback bridge"
             }

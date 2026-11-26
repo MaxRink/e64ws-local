@@ -57,6 +57,8 @@ README = DEPLOY / "README.md"
 GEN_CERTS = DEPLOY / "gen-dev-certs.sh"
 DESIGN = ROOT / "docs" / "LOCAL_CLOUD_DESIGN.md"
 
+from tools.required_inputs import skip_without  # noqa: E402  (ROOT is on sys.path)
+
 DEVICE_SITE = "ngx-secured.sync.mahlkoenig.com"
 IDENTITY_HEADER = service.CLIENT_CERT_HEADER  # X-Client-Cert-Fingerprint
 FORGED_FINGERPRINT = "AB" * 32
@@ -902,6 +904,12 @@ class AuditIntegrityTests(unittest.TestCase):
     """INF-07: the JSONL mirror was written with no ``fsync`` and the design
     claimed a guarantee ("a file the API cannot rewrite") that nothing provided."""
 
+    def setUp(self) -> None:
+        # These two cases assert against the design document, which the gate
+        # withholds as research prose.  The Docker and compose cases above read
+        # only files this repository publishes.
+        skip_without(["docs/LOCAL_CLOUD_DESIGN.md"])
+
     def test_every_audit_append_is_flushed_to_disk(self) -> None:
         with tempfile.TemporaryDirectory(prefix="local-cloud-audit-") as scratch:
             audit = Path(scratch) / "audit.jsonl"
@@ -1008,6 +1016,12 @@ class DevelopmentCertificateTests(unittest.TestCase):
 class DesignConsistencyTests(unittest.TestCase):
     """INF-10: §11 called the api image a placeholder, named a profile that does
     not exist, and the Caddyfile warned about a version that is not pinned."""
+
+    def setUp(self) -> None:
+        # These two cases assert against the design document, which the gate
+        # withholds as research prose.  The Docker and compose cases above read
+        # only files this repository publishes.
+        skip_without(["docs/LOCAL_CLOUD_DESIGN.md"])
 
     def test_the_design_does_not_call_the_api_image_a_placeholder(self) -> None:
         design = DESIGN.read_text(encoding="utf-8")

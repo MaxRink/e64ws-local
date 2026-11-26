@@ -79,10 +79,23 @@ python3 -m unittest discover -s tests -q
 ```
 
 That root suite is self-contained and passes in a clean clone. `tools/run_tests.py`
-is the private tree's full gate: it expects the research corpus (analysis documents,
-vendor artefacts, recorded evidence) that this repository does not publish, so it is
-not a public entry point, and the `tools/` suites that assert on those files fail
-here for want of their input.
+runs what this repository carries and says plainly what it does not:
+
+- a suite whose input is withheld declares it in `requires` and reports `SKIP`
+  naming the missing path — the deep C++ recon suite (reconstructed vendor
+  sources), the boot-script rehearsal (a built `boot.scr`) and the equivalence
+  self-test (a recorded vendor capture baseline);
+- a module this repository does not carry, or whose data is withheld, is declared
+  with the input that makes its absence legitimate; its declared share comes off
+  the suite floor and it is listed as not run with that path, so the modules that
+  are present still have to clear their own share;
+- a test that reads a withheld document skips with the same reason, through
+  `tools/required_inputs.py`, which is the one place that decides what is missing
+  and how it is said.
+
+None of that weakens a check where the input exists: the research tree runs the
+same code and every assertion, 13 suites and 1041 tests. Here the table tells you
+which is which.
 
 ## Nothing here is vendor-endorsed
 

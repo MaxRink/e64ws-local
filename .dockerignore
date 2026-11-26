@@ -1,0 +1,59 @@
+# Build-context exclusions.
+#
+# Two kinds of target build from the repository root: the local-cloud image
+# (deploy/local-cloud/docker-compose.yml uses `context: ../..`) and
+# docker/ios-grindercore/Dockerfile, which compose runs with `context: ..`.  The
+# Python, PHP, Node and firmware-triage targets use docker/ as their context and
+# are unaffected by this file.
+#
+# Without it every one of those builds ships the whole research tree to the
+# daemon: the vendor firmware releases under firmware/ are the bulk of it, and
+# none of them is ever COPYed.  A smaller context is a faster build, and it keeps
+# unrelated files out of the layer-cache key, where they would invalidate a build
+# that changed nothing the image reads.
+#
+# Keep this list about *context size and provenance*.  It must not name a path
+# an image actually COPYs, so the entries are deliberately coarse and the
+# service package (tools/local_cloud) is not excluded.
+
+# Vendor firmware, captures and locally extracted toolchains: fetched or
+# produced, never baked in.
+firmware/
+*.swu
+captures/
+.tools/
+decaid/
+
+# Repository metadata and history.
+.git/
+.github/
+.gitignore
+
+# Build output from the app trees.  Both depths are needed, because Docker's `*`
+# does not cross `/`: `apps/*/build/` matches apps/android/build, and only
+# `apps/*/*/build/` matches apps/android/app/build, which is the exact path
+# docs/REPRODUCIBLE_BUILDS.md §1 names as the Android artifact.  The same holds
+# for the SwiftPM tree under apps/ios/GrinderCore/.build.
+apps/*/build/
+apps/*/*/build/
+apps/*/.build/
+apps/*/*/.build/
+dist/
+
+# Local credentials.  .gitignore already ignores these, and the root-context
+# builds would otherwise carry a real token: the documented
+# `cp deploy/local-cloud/.env.example deploy/local-cloud/.env` produces exactly
+# this file.  `**/` compiles to `(.*/)?`, so the two patterns below cover the
+# context root as well as every subdirectory, and bare `.env` lines would be
+# redundant rather than load-bearing.  `**/.env.*` also drops the shipped
+# `.env.example`, which no image reads.
+**/.env
+**/.env.*
+
+# Interpreter leftovers: the service image copies *.py only, and these would
+# only add noise to the context.
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+.DS_Store

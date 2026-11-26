@@ -22,5 +22,10 @@
 ARG NODE_IMAGE
 FROM ${NODE_IMAGE}
 
+# node:* images already ship a uid-1000 `node` user, so nothing has to be
+# created here: `node --test` reads the mounted checkout and writes its report
+# to stdout.
+USER node
+
 WORKDIR /decaid
 CMD ["sh", "-c", "node --test test/plugins/*.cjs"]

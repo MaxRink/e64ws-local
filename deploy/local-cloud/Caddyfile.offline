@@ -2,12 +2,15 @@
 #
 # Why this file exists: `Caddyfile` terminates TLS for the device hostname and
 # therefore cannot even be validated before an owner has created certs/ and
-# pki/. Verified with caddy:2.8.4-alpine:
+# pki/. Verified 2026-11-25 with the pinned edge image:
 #
-#   docker run --rm -v "$PWD":/cfg caddy:2.8.4-alpine \
+#   docker run --rm -v "$PWD":/cfg \
+#     caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0 \
 #     caddy validate --config /cfg/Caddyfile --adapter caddyfile
-#   Error: ... loading certificates: open /etc/caddy/certs/device-host.crt:
+#   error ... loading certificates: open /etc/caddy/certs/device-host.crt:
 #   no such file or directory
+#
+# (Historically checked with caddy:2.8.4-alpine; same refusal on both.)
 #
 # This variant needs no files, no ACME and no internet:
 #
@@ -19,12 +22,20 @@
 # verification, and the 826-byte trust-slot constraints.  Those need the owner
 # CA and the real `Caddyfile` (docs/LOCAL_CLOUD_DESIGN.md §7).
 #
-# Run it from deploy/local-cloud/ with the compose profile:
+# It has no client-authenticated site at all, which is why it is not the mTLS
+# edge: see the "no identity header" note on each reverse_proxy below.
 #
-#   docker compose --profile offline up -d proxy-offline
+# Run it from deploy/local-cloud/; it *is* the default `proxy` service (there is
+# no `offline` profile and no `proxy-offline` service - `--profile offline` is a
+# no-op that selects nothing):
+#
+#   docker compose up -d proxy
 #   curl -s http://127.0.0.1:8088/ping
 #   curl -s http://127.0.0.1:8088/api/device-service/system/time
 #   curl -sk https://localhost:8443/ping
+#
+# Both published listeners bind 127.0.0.1 by default; for a device test on the
+# LAN set LOCAL_CLOUD_EDGE_BIND=0.0.0.0 (see docker-compose.yml).
 
 {
 	admin off
@@ -42,10 +53,24 @@
 	}
 
 	handle /api/device-service/* {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			# This edge has no client certificate, so it must never carry an
+			# identity header: a value here would be whatever the client typed.
+			# `-` deletes the header outright (adapt emits "delete"), so the API
+			# cannot see a client-supplied X-Client-Cert-Fingerprint even if
+			# LOCAL_CLOUD_TRUST_PROXY_IDENTITY is switched on by mistake.
+			header_up -X-Client-Cert-Fingerprint
+		}
 	}
 	handle /api/* {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			# This edge has no client certificate, so it must never carry an
+			# identity header: a value here would be whatever the client typed.
+			# `-` deletes the header outright (adapt emits "delete"), so the API
+			# cannot see a client-supplied X-Client-Cert-Fingerprint even if
+			# LOCAL_CLOUD_TRUST_PROXY_IDENTITY is switched on by mistake.
+			header_up -X-Client-Cert-Fingerprint
+		}
 	}
 	handle /ping {
 		respond "local-cloud offline edge" 200
@@ -72,7 +97,14 @@ localhost:8443 {
 	# service refuses anonymous requests on its own until an owner enrols a
 	# fingerprint through the admin API.
 	handle /api/* {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			# This edge has no client certificate, so it must never carry an
+			# identity header: a value here would be whatever the client typed.
+			# `-` deletes the header outright (adapt emits "delete"), so the API
+			# cannot see a client-supplied X-Client-Cert-Fingerprint even if
+			# LOCAL_CLOUD_TRUST_PROXY_IDENTITY is switched on by mistake.
+			header_up -X-Client-Cert-Fingerprint
+		}
 	}
 	handle /ping {
 		respond "local-cloud offline edge (tls)" 200

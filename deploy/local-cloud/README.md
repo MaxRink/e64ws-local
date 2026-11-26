@@ -20,7 +20,7 @@ device path being complete.
 | `api` | built from `deploy/local-cloud/Dockerfile` (**real service**) | the ten device-service routes, `/admin/v1/*`, `/healthz` | `internal` only |
 | `proxy` | `caddy:2.8.4-alpine` | default edge: `Caddyfile.offline`, ports 8088 (http) + 8443 (`tls internal`), no certificate files | `edge` + `internal` |
 | `proxy-device` | `caddy:2.8.4-alpine` | profile `device-tls`: the mTLS edge for the compiled hostname, ports 443/80; needs `certs/` + `pki/` | `edge-device` + `internal` |
-| `db` | `postgres:16.4-alpine` | profile `postgres`: the design's target, **unused** — the service serves from SQLite | `internal` |
+| `db` | `postgres:18.7-alpine` | profile `postgres`: the design's target, **unused** — the service serves from SQLite | `internal` |
 | `objects` | `minio/minio:RELEASE.2024-08-17…` | profile `object-store`: template only, the tag does not pull | `internal` |
 | `admin` | `caddy:2.8.4-alpine` | static owner console, loopback only | `admin` |
 
@@ -126,9 +126,9 @@ Every tag above is a pin, but pins age. `caddy:2.8.4-alpine` and
 MinIO tags were **not** re-checked here:
 
 ```sh
-docker pull caddy:2.8.4-alpine python:3.12-alpine postgres:16.4-alpine
+docker pull caddy:2.8.4-alpine python:3.12-alpine postgres:18.7-alpine
 docker image inspect --format '{{index .RepoDigests 0}}' \
-  caddy:2.8.4-alpine python:3.12-alpine postgres:16.4-alpine
+  caddy:2.8.4-alpine python:3.12-alpine postgres:18.7-alpine
 ```
 
 ## What this directory does not do

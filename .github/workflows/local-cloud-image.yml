@@ -1,0 +1,71 @@
+name: local-cloud image
+
+# Why this job exists
+# -------------------
+# The `tests` workflow runs glibc CPython 3.11 and 3.13 on ubuntu.  What this
+# stack actually ships is musl CPython on Alpine, pinned in
+# `deploy/local-cloud/Dockerfile` (`python:3.15-alpine@sha256:...`).  Adding 3.15
+# to that matrix would still be glibc, so it cannot cover the interpreter and C
+# library the container runs on.  This job builds the image and runs the
+# local-cloud suite on the interpreter *inside* it.
+#
+# It is coverage the matrix cannot give, nothing more: it does not replace
+# `sh tools/run_tests.sh` and it runs no other suite.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  musl:
+    name: local-cloud suite on the image interpreter (musl)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the service image
+        run: docker build -f deploy/local-cloud/Dockerfile -t local-cloud-service:dev .
+
+      - name: Report the interpreter and libc the image ships
+        run: |
+          docker run --rm --entrypoint python local-cloud-service:dev -c \
+            'import platform, sys; print(sys.version); print(platform.libc_ver())'
+
+      # No mount: this is exactly what the image carries, so it fails if the
+      # Dockerfile ever stops copying the package or a test stops shipping.
+      - name: Run the suite that ships inside the image
+        run: |
+          docker run --rm --entrypoint python local-cloud-service:dev \
+            -m unittest tools.local_cloud.tests.local_cloud_test -q
+
+      # The repository is mounted for this one because deploy_pins_test.py reads
+      # deploy/local-cloud/{docker-compose.yml,Dockerfile,README.md}.  Those are
+      # deploy inputs, deliberately not baked into the runtime image.
+      - name: Run the full local-cloud suite on the image interpreter
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" -w /src -e PYTHONPATH=/src \
+            --entrypoint python local-cloud-service:dev \
+            -m unittest discover -s tools/local_cloud/tests -p "*_test.py" -t . -q
+
+      - name: The image's own healthcheck reaches healthy
+        run: |
+          # `health_state`, not `status`: `status` is read-only in zsh, which
+          # trips anyone rerunning this block by hand. The rm makes the block
+          # re-runnable locally after a failed attempt.
+          docker rm -f local-cloud-ci >/dev/null 2>&1 || true
+          docker run -d --name local-cloud-ci local-cloud-service:dev
+          health_state=""
+          for attempt in $(seq 1 20); do
+            health_state=$(docker inspect -f '{{.State.Health.Status}}' local-cloud-ci)
+            echo "attempt $attempt: $health_state"
+            [ "$health_state" = "healthy" ] && break
+            sleep 3
+          done
+          docker logs local-cloud-ci
+          test "$health_state" = "healthy"

@@ -374,7 +374,14 @@ class E64LocalAPI:
                     response.read(),
                 )
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            # The body is copied out for the message, so the response is closed
+            # once it has been — including when that read raises, which is when
+            # the socket would otherwise stay open while the caller handles the
+            # error.
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            finally:
+                exc.close()
             raise E64WSAPIError(f"REST {route} returned HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
             raise E64WSAPIError(f"local REST request failed for {route}: {exc.reason}") from exc
@@ -414,11 +421,22 @@ class E64LocalAPI:
                 )
         except urllib.error.HTTPError as exc:
             # An error status is still an answer: keep the code and the body.
-            return RestResponse(
-                exc.code,
-                {str(k): str(v) for k, v in (exc.headers or {}).items()},
-                exc.read(),
-            )
+            # Closing is explicit rather than incidental.  When ``read()``
+            # reaches EOF, ``HTTPResponse.read()`` has already dropped the
+            # connection, so on the ordinary 403 this changes nothing —
+            # measured, 50 refused probes on loopback: +0 descriptors either
+            # way.  A read that *raises* (a stalled body, a timeout) leaves the
+            # socket open, and that is the path this closes: measured, 50
+            # stalled probes were +50 descriptors without this ``finally`` and
+            # +0 with it.
+            try:
+                return RestResponse(
+                    exc.code,
+                    {str(k): str(v) for k, v in (exc.headers or {}).items()},
+                    exc.read(),
+                )
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError):
             return None
 

@@ -34,7 +34,12 @@ internal class SimulatorClient(
 
     val cookieJar = CookieJar()
 
-    val endpoint = GrinderEndpoint("127.0.0.1", bridge.port)
+    /**
+     * The bridge's own address. The dialled host is therefore the listening host
+     * by construction, not a second copy of the literal that could drift from it
+     * (which is what made the suite depend on the JVM's loopback preference).
+     */
+    val endpoint = GrinderEndpoint(bridge.host, bridge.port)
 
     /** The SHA-256 the app would show the owner before accepting the device. */
     val pin: String = bridge.fingerprint

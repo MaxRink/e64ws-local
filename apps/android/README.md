@@ -41,6 +41,39 @@ The build fails if either bundled PHP file does not match its `ondevice/` copy
 byte for byte (`verifyBundledModule` task); the same digests are asserted again
 by `BundledModuleDigestTest`.
 
+### The build cache is scoped to the checkout
+
+`settings.gradle.kts` puts the local build cache in `.gradle/build-cache` rather
+than in the Gradle user home, so a `:app:mergeDebugResources` entry written under
+another checkout is never restored here. AGP 9.5.3 stores that entry's resource
+directories as absolute paths while the cache key ignores them, so the entry
+describes the checkout that wrote it rather than the one reading it.
+
+If a merge ever publishes only the app's own resources and AAPT then reports
+"not found" for symbols `androidx.core` declares itself - for instance
+`drawable/notification_action_background.xml` and the `compat_*` dimens and
+styles it references - that is this cache and not a missing AppCompat
+dependency. Repairing a tree that restored a bad entry means making the merge run
+again: `./gradlew --rerun-tasks`, which also overwrites the entry with a good one,
+or deleting `.gradle/build-cache` **and** `app/build` and rebuilding. `clean`
+alone does not help - the merge is restored from the cache again - and
+`--no-build-cache` only helps together with a clean, leaving the bad entry in
+place for the next cached build.
+
+An AGP upgrade may make the scoping unnecessary. To decide, count how many lines
+across the cached entries name this checkout - it greps lines, not entries, so
+two entries that still record the path print `4`. Run it after a
+`./gradlew clean :app:assembleDebug`, in a tree whose `.gradle/build-cache` is
+populated: an empty cache prints `0` and proves nothing, and so does a wrong
+`$PWD` or a moved `merger.xml`. The count has to reach `0` on a populated cache
+before the cache can move back to the Gradle user home:
+
+```bash
+for e in .gradle/build-cache/[0-9a-f]*; do
+  gunzip -c "$e" 2>/dev/null | tar -xO ./tree-incrementalFolder/merger.xml 2>/dev/null
+done | grep -c "$PWD/app/src/main/res"
+```
+
 ## Auth model
 
 1. Vendor session: `POST /login.php` with `login=1`, `userRole=Owner` and the
@@ -135,9 +168,10 @@ flash/NVS, the bootloader, eFuse or a firmware image. It never writes
 
 ## Tests
 
-`./gradlew :app:testDebugUnitTest` runs **159 JVM tests**, all offline and
+`./gradlew :app:testDebugUnitTest` runs **162 JVM tests**, all offline and
 without an emulator: the 155 that existed before the live suite (114 from before
-the action layer, 41 from it) plus 4 new ones - three offline closed-gate checks
+the action layer, 41 from it), the 3 that came with the exchange log in
+`BridgeOrderingUnitTest`, and the 4 new ones - three offline closed-gate checks
 and the live end-to-end entry point, which skips itself when no simulator address
 is given.
 

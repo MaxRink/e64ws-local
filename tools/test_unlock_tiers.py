@@ -27,7 +27,9 @@ properties.  This suite is the proof, one test per claim:
   arrives through it, that an unreachable or unreviewed responder stays
   ``unknown``, and that a fact the adapter cannot justify is passed absent
   (``AdapterWiringTests``, ``AdapterOutcomeTests``, ``AdapterUnknownTests``,
-  ``AdapterFactHonestyTests``, ``ProbeTransportTests``).
+  ``AdapterFactHonestyTests``, ``ProbeTransportTests`` — the last one also
+  pins that the error response is closed, including on the one path where an
+  open one really holds a socket: a body read that raises).
 
 What the inversions catch, and what they do not: the ``_decide`` substitutions
 are *double* inversions, because the mock keeps the original function and calls
@@ -37,8 +39,11 @@ cancels out and these proofs cannot see it — the property tests can, and do
 ignored, mis-supplied or numbered wrong, and a test that stops noticing that
 stops passing this file.
 
-89 tests. Nothing here touches a device, a socket or a file outside this
-repository.
+91 tests. Nothing here touches a device, a socket or a file outside this
+repository; the end-to-end suite that does open a socket is
+``tools/test_unlock_tier_e2e.py`` (``docs/UNLOCK_TIERS.md`` §7.5), and it is the
+instrument for "a plugin holding a connection gets this tier", which a stub
+cannot answer.
 """
 
 from __future__ import annotations
@@ -1411,6 +1416,13 @@ class AdapterFactHonestyTests(unittest.TestCase):
         self.assertFalse(adapter.audit_log()[-1].allowed)
 
 
+class StallingBody(io.BytesIO):
+    """A body that never reaches EOF: the read raises, as a timeout does."""
+
+    def read(self, *args: Any, **kwargs: Any) -> bytes:
+        raise TimeoutError("the body never arrived")
+
+
 class CannedResponse:
     """The shape ``urllib`` hands back to ``E64LocalAPI``."""
 
@@ -1464,6 +1476,53 @@ class ProbeTransportTests(unittest.TestCase):
         self.assertEqual(response.json()["errorCode"], 403)
         api.close()
 
+    def test_a_probe_closes_the_error_response_it_read(self) -> None:
+        # This asserts that ``close()`` is *called*, not that a descriptor was
+        # leaking on this path: reading the body to EOF already closed the
+        # connection, so the descriptor count is unchanged either way.  The
+        # client should not have to depend on the read finishing, which is what
+        # the next test is about.
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        body = io.BytesIO(b'{"success":false,"errorCode":403}')
+        error = urllib.error.HTTPError(
+            f"{api.base_url}/rest_api/capabilities",
+            403,
+            "Forbidden",
+            {"Content-Type": "application/json"},
+            body,
+        )
+        with mock.patch.object(api._opener, "open", side_effect=error):
+            response = api.rest_probe("capabilities", {})
+
+        assert response is not None
+        self.assertEqual(response.status, 403)
+        self.assertTrue(body.closed, "the probe read the body and left the response open")
+        api.close()
+
+    def test_a_probe_closes_the_error_response_when_the_body_read_fails(self) -> None:
+        # The path where an unclosed error response really holds a socket: a
+        # stalled server, so the read raises before EOF and nothing has closed
+        # the connection.  Measured on loopback with the caught exceptions
+        # retained, 50 stalled probes: +50 descriptors without the close, +0
+        # with it.
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        body = StallingBody()
+        error = urllib.error.HTTPError(
+            f"{api.base_url}/rest_api/capabilities",
+            403,
+            "Forbidden",
+            {"Content-Type": "application/json"},
+            body,
+        )
+        with mock.patch.object(api._opener, "open", side_effect=error):
+            with self.assertRaises(TimeoutError):
+                api.rest_probe("capabilities", {})
+
+        self.assertTrue(
+            body.closed, "the read raised and the error response stayed open"
+        )
+        api.close()
+
     def test_a_transport_failure_is_no_response(self) -> None:
         api = E64LocalAPI("127.0.0.1", token="wss-token")
         with mock.patch.object(
@@ -1473,19 +1532,21 @@ class ProbeTransportTests(unittest.TestCase):
         api.close()
 
     def test_rest_raw_still_raises_on_an_error_status(self) -> None:
-        # The probe is additive: a failed call is still a failed call.
+        # The probe is additive: a failed call is still a failed call, and the
+        # body it quotes is copied out before the response is closed.
         api = E64LocalAPI("127.0.0.1", token="wss-token")
+        body = io.BytesIO(b'{"errorCode":403}')
         error = urllib.error.HTTPError(
             f"{api.base_url}/rest_api/grind_log",
             403,
             "Forbidden",
             {},
-            io.BytesIO(b'{"errorCode":403}'),
+            body,
         )
-        self.addCleanup(error.close)
         with mock.patch.object(api._opener, "open", side_effect=error):
             with self.assertRaises(E64WSAPIError):
                 api.rest_raw("grind_log", {})
+        self.assertTrue(body.closed, "the raise left the error response open")
         api.close()
 
     def test_the_owner_token_reaches_the_wire_and_not_the_url(self) -> None:

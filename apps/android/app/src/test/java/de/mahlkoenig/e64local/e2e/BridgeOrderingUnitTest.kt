@@ -6,6 +6,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.Executors
@@ -170,6 +171,33 @@ class BridgeOrderingUnitTest {
         }
     }
 
+    /**
+     * The listener and the dialers cannot disagree - and not because this JVM
+     * happens to answer IPv4 for a name.
+     *
+     * The bridge used to bind `InetAddress.getLoopbackAddress()` while
+     * [SimulatorClient] dialled `127.0.0.1`. On an IPv6-first JVM
+     * (`-Djava.net.preferIPv6Addresses=true`) the first is `::1` and the second is
+     * not, so the live suite failed with `Connection refused` while this class
+     * stayed green - it dialled the same name the bridge bound, so it agreed with
+     * the defect. The address is now one literal for the bind, the certificate and
+     * the dialers, and the bridge reports the address it really bound, so a bind
+     * that drifts away from that literal fails here instead of in a live run.
+     */
+    @Test
+    fun `the bridge listens on the literal the suite dials`() {
+        withBridge(closedPort()) { bridge, port ->
+            assertEquals(LoopbackHost.LITERAL, bridge.host)
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(bridge.host, port), 5_000)
+                assertTrue(
+                    "nothing is listening on ${bridge.host}:$port",
+                    socket.isConnected,
+                )
+            }
+        }
+    }
+
     // -- fixture --------------------------------------------------------------
 
     private fun <T> withUpstream(body: String, block: (HttpServer) -> T): T {
@@ -270,7 +298,8 @@ class BridgeOrderingUnitTest {
         const val BLOCKED_PATH = "/rest_api/stalled"
         const val TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         val CRLF = intArrayOf('\r'.code, '\n'.code, '\r'.code, '\n'.code)
-        val loopback: InetAddress = InetAddress.getLoopbackAddress()
+        /** The same literal the bridge binds, so this fixture cannot drift family. */
+        val loopback: InetAddress = LoopbackHost.ADDRESS
         val trustAll: X509TrustManager = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String) = Unit
 

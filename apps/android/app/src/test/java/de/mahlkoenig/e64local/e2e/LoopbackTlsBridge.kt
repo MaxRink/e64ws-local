@@ -22,6 +22,29 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 
 /**
+ * The one loopback address the suite listens on, issues its certificate for and
+ * dials.
+ *
+ * It is an IP literal on purpose. `InetAddress.getLoopbackAddress()` answers from
+ * `java.net.preferIPv6Addresses`, so on an IPv6-first JVM (`-Djava.net.preferIPv6Addresses=true`,
+ * the workaround a host with no IPv4 route needs for a cold Gradle resolve) it
+ * resolves to `::1`, while the runner states `127.0.0.1` in `E64_E2E_BASE_URL`,
+ * the fixture certificate names `127.0.0.1`, and the clients dial `127.0.0.1`.
+ * Bound to that name and dialled at the literal, the suite passed on an
+ * IPv4-first JVM and failed with `Connection refused` on an IPv6-first one: the
+ * listener and the dialers were one JVM flag apart. A single literal, used by
+ * the bind, the certificate and the dialers, removes the family choice from the
+ * suite instead of hiding it behind a retry.
+ */
+internal object LoopbackHost {
+    /** The address as a dialer spells it. Never a name whose family depends on a flag. */
+    const val LITERAL: String = "127.0.0.1"
+
+    /** [LITERAL] as the address a server socket binds to. */
+    val ADDRESS: InetAddress = InetAddress.getByName(LITERAL)
+}
+
+/**
  * The certificate the suite's loopback TLS bridge presents.
  *
  * The app's production stack is TLS-only (`HttpsURLConnection` plus a pinned
@@ -69,8 +92,8 @@ internal class TlsFixture private constructor(
                 "-keyalg", "RSA",
                 "-keysize", "2048",
                 "-sigalg", "SHA256withRSA",
-                "-dname", "CN=127.0.0.1,O=e64local e2e fixture",
-                "-ext", "SAN=ip:127.0.0.1,dns:localhost",
+                "-dname", "CN=${LoopbackHost.LITERAL},O=e64local e2e fixture",
+                "-ext", "SAN=ip:${LoopbackHost.LITERAL},dns:localhost",
                 "-validity", "2",
                 "-storetype", "PKCS12",
                 "-keystore", store.absolutePath,
@@ -137,6 +160,13 @@ internal class LoopbackTlsBridge private constructor(
     private val server: HttpsServer,
 ) : AutoCloseable {
     val exchanges = WireLog()
+
+    /**
+     * The address the server is actually listening on, in the form a dialer must
+     * use. Clients take their host from here, so a listener and a dialer cannot
+     * end up in different address families.
+     */
+    val host: String get() = server.address.address.hostAddress
 
     val port: Int get() = server.address.port
 
@@ -228,7 +258,10 @@ internal class LoopbackTlsBridge private constructor(
 
     companion object {
         fun to(upstream: E2EEnvironment.Target, tls: TlsFixture = TlsFixture.shared()): LoopbackTlsBridge {
-            val server = HttpsServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+            // Bound to the literal, not to InetAddress.getLoopbackAddress(): that
+            // name moves to ::1 under -Djava.net.preferIPv6Addresses=true and the
+            // bridge then listened where no client in this suite connects.
+            val server = HttpsServer.create(InetSocketAddress(LoopbackHost.ADDRESS, 0), 0)
             val bridge = LoopbackTlsBridge(upstream.scheme, upstream.host, upstream.port, tls, server)
             server.httpsConfigurator = HttpsConfigurator(tls.sslContext())
             server.createContext("/") { exchange -> bridge.handle(exchange) }

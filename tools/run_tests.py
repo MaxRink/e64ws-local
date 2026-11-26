@@ -17,6 +17,19 @@ not look like a green run.  Update the minimum in the same commit that removes
 or renames tests.  Test files that no suite covers are a failure too, so a new
 suite cannot be dropped silently.  Files that are deliberately not run are
 listed in ``EXCLUDED`` with the reason, and printed with every run.
+
+A suite whose collection depends on a local Docker image declares it in
+``docker_images``.  The image is checked before the suite starts and a missing
+one fails the suite with the command that pulls it, so a host that was never
+provisioned cannot be mistaken for a suite that lost its tests.
+
+A suite whose input this checkout does not carry declares it in
+``requires_paths``.  This tree is the published subset of a larger research
+tree, and the export gate withholds vendor firmware, captured evidence and
+research prose; a suite that reads those paths has no input here.  That is a
+property of the checkout, not a regression, so the suite is reported as ``SKIP``
+with the withheld path.  It is deliberately neither a ``PASS`` (nothing ran) nor
+a ``FAIL`` (nothing broke).
 """
 
 from __future__ import annotations
@@ -25,6 +38,7 @@ import argparse
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,6 +62,17 @@ class UnittestSuite:
     top: str | None = None
     modules: tuple[str, ...] = ()
     pythonpath: tuple[str, ...] = ()
+    # Local Docker images the suite needs.  A missing image is a host problem,
+    # not a lost test, so it is reported before collection with the command
+    # that pulls it.  Without this field the suite would skip a whole class in
+    # ``setUpClass`` and look exactly like a suite whose tests were deleted.
+    docker_images: tuple[str, ...] = ()
+    # Paths this suite reads that the tree does not produce.  A suite whose
+    # input is withheld by the export gate cannot run in a published subset, and
+    # that is not the same finding as a suite whose tests failed: it is reported
+    # as SKIP with the withheld path and the gate's verdict, and it never counts
+    # as a lost test or as a green run.
+    requires_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +84,7 @@ class FunctionSuite:
     note: str
     minimum: int
     path: str
+    requires_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,6 +95,7 @@ class CommandSuite:
     cwd: Path
     note: str
     commands: tuple[tuple[str, ...], ...]
+    requires_paths: tuple[str, ...] = ()
 
 
 # Test files that exist in the tree but are deliberately not part of the
@@ -81,9 +108,22 @@ EXCLUDED_FILES: tuple[tuple[str, str], ...] = (
         "gitignored decaid/ plugin checkout, which a clean checkout lacks.",
     ),
     (
-        "tools/rebuild/esp-app/recon/tests/qemu_test.py",
-        "drives the reconstructed ESP32 image in Espressif QEMU; the QEMU "
-        "binary and flash image are not in the repository.",
+        "tools/test_hacks_doc.py",
+        "reads docs/HACKS.md; this mirror carries no docs/ because the export "
+        "gate classes it research-prose / publish with changes. The file is "
+        "published, the document it checks is not.",
+    ),
+    (
+        "tools/test_unlock_tiers.py",
+        "reads docs/UNLOCK_TIERS.md, docs/LOCAL_API.md and "
+        "docs/openapi/local-api.yaml; this mirror carries no docs/ because the "
+        "export gate classes it research-prose / publish with changes.",
+    ),
+    (
+        "tools/test_public_export_policy.py",
+        "imports tools/public_export.py, which the gate classes own-code / "
+        "never: the gate quotes the deny patterns it refuses, so it cannot "
+        "publish itself. Published test, withheld subject.",
     ),
     (
         "tools/official_app_cloud_ui_test.py",
@@ -124,7 +164,16 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
         "tools",
         ROOT,
         note="unit modules under tools/",
-        minimum=173,
+        # Measured on this tree, not copied from the research repository.  Four
+        # modules that the research runner registers are absent here because the
+        # export gate withholds what they import: tools/test_firmware_triage.py
+        # and tools/test_public_export.py are `never`, so they are not in this
+        # tree at all and cannot be named here; tools/test_hacks_doc.py and
+        # tools/test_unlock_tiers.py are published but read documents under
+        # docs/, which is `research-prose` / `publish with changes` and absent
+        # here, so they are listed in EXCLUDED with that reason instead.
+        # 163 is what is left of the research runner's 339; measured on this tree.
+        minimum=163,
         modules=(
             "tools.test_e64ws_client",
             "tools.test_e64ws_simulator",
@@ -135,16 +184,18 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
             "tools.test_todo_status",
             "tools.test_capture_proxy",
             "tools.test_api_coverage",
-            "tools.test_firmware_triage",
+            "tools.test_capture_setup_screenshots",
+            "tools.test_run_tests",
         ),
     ),
     UnittestSuite(
         "e64root",
         ROOT / "tools" / "e64root",
         note="owner root/SSH CLI",
-        minimum=269,
+        minimum=276,
         start="tests",
         top=".",
+        docker_images=("php:8.3-cli",),
     ),
     UnittestSuite(
         "reimpl",
@@ -157,8 +208,8 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
     UnittestSuite(
         "local-cloud",
         ROOT,
-        note="local-cloud service, contract refusals and Xenia CLI",
-        minimum=53,
+        note="local-cloud service, contract refusals, deploy pins and deployment files",
+        minimum=135,
         start="tools/local_cloud/tests",
         pattern="*_test.py",
     ),
@@ -198,12 +249,18 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
             (sys.executable, "tests/test_boot_scr.py"),
             ("sh", "tests/rehearse_recovery.sh"),
         ),
+        # The harness sources the built boot script; the gate classes it
+        # build-artifact / never, so it is produced by the build and not shipped.
+        requires_paths=("tools/virtual-grinder/boot.scr",),
     ),
     CommandSuite(
         "equiv-selftest",
         ROOT,
         note="differential harness comparator self-test",
         commands=((sys.executable, "tools/equiv/tools/selftest.py"),),
+        # Mutates a copy of the vendor capture baseline, which only a real device
+        # run produces.  Not tracked in any tree, so not carried here.
+        requires_paths=("runs/vendor/02_readonly",),
     ),
     CommandSuite(
         "recon-cxx",
@@ -213,6 +270,8 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
             ("sh", "tests/run_scale_gateway_test.sh"),
             ("sh", "tests/run_host_gateway_test.sh"),
         ),
+        # Reconstructed vendor sources: vendor-derived-code / never, withheld.
+        requires_paths=("tools/rebuild/esp-app/recon/scale_gateway.cpp",),
     ),
 )
 
@@ -265,6 +324,47 @@ def _environment(suite: UnittestSuite) -> dict[str, str]:
     return env
 
 
+def docker_image_problem(image: str) -> str | None:
+    """Why a local Docker image cannot be used, or ``None`` when it is there.
+
+    A suite that silently collects fewer tests because an image was never
+    pulled is indistinguishable from a suite whose tests were deleted, so the
+    missing image is reported as itself, with the command that fixes it, and
+    before anything is collected.
+    """
+    pull = f"docker pull {image}"
+    if shutil.which("docker") is None:
+        return f"docker is not installed; install Docker, then run: {pull}"
+    try:
+        completed = subprocess.run(
+            ["docker", "image", "inspect", image],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return f"{image} is not available; {pull}"
+    if completed.returncode != 0:
+        return f"{image} is not available; {pull}"
+    return None
+
+
+def not_carried(suite: UnittestSuite | FunctionSuite | CommandSuite) -> str | None:
+    """Why this checkout cannot run the suite at all, or ``None`` when it can.
+
+    A published tree is a subset of the tree the suite was written for: the
+    export gate withholds vendor firmware, captured evidence and research prose,
+    and code that reads those paths has no input here.  That is a property of
+    the checkout, not a regression, so it is reported as SKIP with the reason
+    rather than as a silent zero, a failed assertion or a green run.
+    """
+    for path in suite.requires_paths:
+        if not (ROOT / path).exists():
+            return f"not carried by this checkout: {path}"
+    return None
+
+
 def _preflight(suite: UnittestSuite | FunctionSuite) -> str | None:
     """Return why the suite cannot start, or ``None`` when its inputs exist."""
     if not suite.cwd.is_dir():
@@ -276,6 +376,10 @@ def _preflight(suite: UnittestSuite | FunctionSuite) -> str | None:
             path = suite.cwd / (module.replace(".", "/") + ".py")
             if not path.is_file():
                 return f"missing module {path.relative_to(ROOT)}"
+        for image in suite.docker_images:
+            problem = docker_image_problem(image)
+            if problem is not None:
+                return problem
     else:
         path = suite.cwd / suite.path
         if not path.is_file():
@@ -285,6 +389,12 @@ def _preflight(suite: UnittestSuite | FunctionSuite) -> str | None:
 
 def _run_unittest(suite: UnittestSuite, verbose: bool) -> Result:
     result = Result(name=suite.name, note=suite.note)
+    withheld = not_carried(suite)
+    if withheld is not None:
+        result.status = "SKIP"
+        result.detail = withheld
+        result.output = withheld
+        return result
     missing = _preflight(suite)
     if missing is not None:
         result.detail = missing
@@ -352,6 +462,12 @@ def _run_unittest(suite: UnittestSuite, verbose: bool) -> Result:
 
 def _run_functions(suite: FunctionSuite, verbose: bool) -> Result:
     result = Result(name=suite.name, note=suite.note)
+    withheld = not_carried(suite)
+    if withheld is not None:
+        result.status = "SKIP"
+        result.detail = withheld
+        result.output = withheld
+        return result
     missing = _preflight(suite)
     if missing is not None:
         result.detail = missing
@@ -417,6 +533,12 @@ def _run_functions(suite: FunctionSuite, verbose: bool) -> Result:
 
 def _run_commands(suite: CommandSuite, verbose: bool) -> Result:
     result = Result(name=suite.name, note=suite.note)
+    withheld = not_carried(suite)
+    if withheld is not None:
+        result.status = "SKIP"
+        result.detail = withheld
+        result.output = withheld
+        return result
     if not suite.cwd.is_dir():
         result.detail = f"missing directory {suite.cwd}"
         result.output = result.detail
@@ -539,7 +661,10 @@ def _print_summary(results: list[Result]) -> bool:
         f"{total_failed:>5} {total_errors:>6} {total_skipped:>5}"
     )
 
-    ok = all(result.status == "PASS" for result in results)
+    # SKIP means "this checkout does not carry the input", declared by the suite
+    # and reported above.  It is not a pass -- nothing ran -- and it is not a
+    # failure of the tree that was published.
+    ok = all(result.status in ("PASS", "SKIP") for result in results)
     print()
     print("Result:", "PASS" if ok else "FAIL")
     return ok

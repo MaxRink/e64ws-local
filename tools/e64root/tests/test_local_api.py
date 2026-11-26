@@ -5,8 +5,10 @@ Two layers are covered:
 * the simulator HTTP fixture, which mirrors the documented contract and is the
   always-available offline parity test;
 * the PHP module itself, executed in a disposable PHP container with a SQLite
-  fixture and a stubbed ``sudo sqlite3``.  The PHP layer is skipped when no
-  local ``php:8.3-cli`` image is available; it never contacts a device.
+  fixture and a stubbed ``sudo sqlite3``.  The container half needs the
+  ``php:8.3-cli`` image in the local Docker daemon (``docker pull php:8.3-cli``);
+  it never contacts a device.  ``tools/run_tests.py`` fails the ``e64root``
+  suite when the image is missing instead of quietly collecting fewer tests.
 
 No real SSH, grinder, or network is used.
 """
@@ -27,6 +29,7 @@ import urllib.request
 from pathlib import Path
 
 from helpers import FIXTURES  # noqa: F401  (sets sys.path)
+from host_requirements import PHP_IMAGE, php_image_problem, php_image_ready
 
 from e64ws_simulator import (
     SimulatedAuth,
@@ -38,7 +41,7 @@ from e64ws_simulator import (
 
 TOKEN = "sim-local-api-token"
 OWNER = "harness-owner-token"
-DOCKER_IMAGE = "php:8.3-cli"
+DOCKER_IMAGE = PHP_IMAGE
 LOCAL_API_FIXTURES = FIXTURES / "local_api"
 REPO = Path(__file__).resolve().parents[3]
 MODULE = REPO / "ondevice" / "rest_api_dev.php"
@@ -77,14 +80,13 @@ def action_policy(*, destructive: bool = False, rates: dict | None = None) -> di
 
 
 def docker_ready() -> bool:
-    if not shutil.which("docker"):
-        return False
-    result = subprocess.run(
-        ["docker", "image", "inspect", DOCKER_IMAGE],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
+    """True when the local ``php:8.3-cli`` image can run the container tests.
+
+    The requirement itself lives in ``host_requirements`` so that the skip
+    reason here, in ``test_local_actions`` and the runner's preflight all name
+    the same image and the same ``docker pull`` command.
+    """
+    return php_image_ready(DOCKER_IMAGE)
 
 
 class SimulatorCase(unittest.TestCase):
@@ -489,10 +491,9 @@ class PhpModuleCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not docker_ready():
-            raise unittest.SkipTest(
-                f"{DOCKER_IMAGE} is not available; PHP module tests skipped"
-            )
+        problem = php_image_problem(DOCKER_IMAGE)
+        if problem is not None:
+            raise unittest.SkipTest(problem)
 
         cls.temporary = tempfile.TemporaryDirectory()
         root = Path(cls.temporary.name)
@@ -1592,6 +1593,18 @@ class DocumentationCase(unittest.TestCase):
         )
 
     def test_openapi_parses_and_covers_every_route(self) -> None:
+        # This repository is the published subset of the research tree, and the
+        # export gate classes docs/ as research-prose / publish with changes, so
+        # docs/openapi/local-api.yaml is withheld and not carried here. Where it
+        # exists (the research tree) the document is still asserted; where it does
+        # not, skip with that reason instead of failing on a file this checkout
+        # was never meant to contain.
+        if not OPENAPI.is_file():
+            self.skipTest(
+                "docs/openapi/local-api.yaml is withheld by the export gate "
+                "(research-prose / publish with changes), so it is not carried "
+                "in this checkout"
+            )
         try:
             import yaml  # type: ignore[import-not-found]
         except ImportError:

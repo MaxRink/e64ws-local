@@ -155,6 +155,12 @@ internal object E2EEnvironment {
  * A tiny record of what went over the wire, used by the checks that assert
  * transport invariants (the owner token header, the session cookie, where the
  * confirm token may appear).
+ *
+ * The ordering contract with [LoopbackTlsBridge] is what makes those assertions
+ * sound: an entry is added *before* the answer it describes is written back to
+ * the client, so a check that reads this log once its call has returned can
+ * never miss an exchange that was in fact served. [BridgeOrderingUnitTest]
+ * pins that invariant.
  */
 internal class WireLog {
     data class Entry(

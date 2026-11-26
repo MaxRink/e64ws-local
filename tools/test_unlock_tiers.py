@@ -20,7 +20,14 @@ properties.  This suite is the proof, one test per claim:
   device answering ``action_*`` through the reviewed module for the owner token
   is never classified below ``root-custom-api``;
 * **the mutation proof** — every one of those tests is re-run against an
-  inverted rule and must fail there.
+  inverted rule and must fail there;
+* **the consumer** — ``E64DecaidAdapter.unlock_tier()`` is the first caller of
+  ``detect()`` that is not a fixture.  Five classes pin that it *calls* the
+  detector rather than re-deriving a tier, that each of the five outcomes
+  arrives through it, that an unreachable or unreviewed responder stays
+  ``unknown``, and that a fact the adapter cannot justify is passed absent
+  (``AdapterWiringTests``, ``AdapterOutcomeTests``, ``AdapterUnknownTests``,
+  ``AdapterFactHonestyTests``, ``ProbeTransportTests``).
 
 What the inversions catch, and what they do not: the ``_decide`` substitutions
 are *double* inversions, because the mock keeps the original function and calls
@@ -30,15 +37,17 @@ cancels out and these proofs cannot see it — the property tests can, and do
 ignored, mis-supplied or numbered wrong, and a test that stops noticing that
 stops passing this file.
 
-60 tests. Nothing here touches a device, a socket or a file outside this
+89 tests. Nothing here touches a device, a socket or a file outside this
 repository.
 """
 
 from __future__ import annotations
 
 import ast
+import io
 import json
 import unittest
+import urllib.error
 from pathlib import Path
 from typing import Any, Mapping
 from unittest import mock
@@ -49,7 +58,15 @@ MODULE = ROOT / "tools" / "unlock_tiers.py"
 PHP_MODULE = ROOT / "ondevice" / "rest_api_dev.php"
 OPENAPI = ROOT / "docs" / "openapi" / "local-api.yaml"
 
+from integrations.decaid.e64ws_adapter import (  # noqa: E402  (one consumer surface)
+    ActionProbe,
+    DecaidCapabilityPolicy,
+    E64DecaidAdapter,
+    LocalObservations,
+    UnlockTierReport,
+)
 from tools import unlock_tiers  # noqa: E402  (path is set by the suite runner)
+from tools.e64ws_api import E64LocalAPI, E64WSAPIError  # noqa: E402
 from tools.unlock_tiers import (  # noqa: E402
     ACTION_META_ROUTES,
     DEV_TOKEN,
@@ -934,6 +951,551 @@ def action_meta_routes_in(path: Path) -> set[str]:
         for token in body.splitlines()[1:]
         if token.strip().startswith('"')
     }
+
+
+# --- The consumer: the adapter, on a connection it does not get to fake ------------
+#
+# ``integrations/decaid/e64ws_adapter.py`` is the first caller of ``detect()``
+# that is not a fixture.  These tests pin three different claims, and they are
+# deliberately separate:
+#
+# * that the adapter *calls* the detector (``AdapterWiringTests``) — a second
+#   implementation of the rule would pass every outcome test below while
+#   failing these;
+# * that each of the five outcomes arrives through the adapter from facts it
+#   could actually have observed (``AdapterOutcomeTests``);
+# * that a fact the adapter cannot justify is passed absent rather than guessed
+#   (``AdapterFactHonestyTests``), which is what makes ``unknown`` reachable.
+
+OWNER_TOKEN = "test-owner-token-not-a-real-secret"
+
+#: The reviewed module's document, with the action gate closed: what a
+#: development image with the module installed answers.
+REVIEWED_CAPABILITIES: dict[str, Any] = {
+    "success": True,
+    "data": {
+        "schema": "e64local-api-v1",
+        "route": "capabilities",
+        "apiVersion": "1",
+        "routes": sorted(READ_ROUTES),
+        "actions": {
+            "schema": "e64local-api-v1",
+            "enabled": False,
+            "destructiveEnabled": False,
+            "catalog": [],
+        },
+        "features": {"actions": False, "destructiveActions": False, "wssToken": True},
+        "devMode": True,
+    },
+}
+
+
+class FakeResponse:
+    """One probe answer: an HTTP status and, usually, a JSON body."""
+
+    def __init__(self, status: int, document: Any = None, *, decodable: bool = True) -> None:
+        self.status = status
+        self._document = document
+        self._decodable = decodable
+
+    def json(self) -> Any:
+        if not self._decodable or self._document is None:
+            raise ValueError("this answer carries no JSON document")
+        return self._document
+
+
+class FakeTransport:
+    """The adapter's API client: records every probe, answers from a table.
+
+    ``rest_probe`` has the shape ``E64LocalAPI.rest_probe`` has — any HTTP
+    status is a response, and ``None`` means no response came back at all — so
+    these tests cannot accidentally assume a status they did not supply.
+    """
+
+    def __init__(self, answers: Mapping[str, Any] | None = None) -> None:
+        self.answers = dict(answers or {})
+        self.calls: list[dict[str, Any]] = []
+
+    def rest_probe(
+        self,
+        route: str,
+        body: Any = None,
+        *,
+        method: str = "POST",
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        self.calls.append({"route": route, "body": body, "headers": dict(headers or {})})
+        return self.answers.get(route)
+
+    def routes(self) -> list[str]:
+        return [str(call["route"]) for call in self.calls]
+
+    def call(self, route: str) -> dict[str, Any]:
+        for call in self.calls:
+            if call["route"] == route:
+                return call
+        raise AssertionError(f"no {route} request was made: {self.routes()}")
+
+
+def reviewed_capabilities(**overrides: Any) -> FakeResponse:
+    """A 200 carrying the reviewed document, with individual keys replaced."""
+    document = json.loads(json.dumps(REVIEWED_CAPABILITIES))
+    document["data"].update(overrides)
+    return FakeResponse(200, document)
+
+
+def adapter_for(transport: Any, **kwargs: Any) -> E64DecaidAdapter:
+    kwargs.setdefault("owner_token", OWNER_TOKEN)
+    return E64DecaidAdapter(transport, **kwargs)
+
+
+class AdapterWiringTests(unittest.TestCase):
+    """The adapter must call ``detect()``; a copy of the rule must fail here."""
+
+    def test_the_adapter_calls_the_detector_rather_than_re_deriving_the_tier(self) -> None:
+        # The detector is replaced by a spy whose tier is not a tier name, so
+        # only a real call can produce it.  A consumer that re-implemented the
+        # precedence would answer one of the five known names instead.
+        seen: dict[str, Any] = {}
+
+        def spy(fact_set: Mapping[str, Any]) -> dict[str, Any]:
+            seen["facts"] = fact_set
+            return {
+                "tier": "answered-by-the-detector",
+                "evidence": {"unseparated": [TIER_ROOT]},
+                "reasons": ["the detector said so"],
+            }
+
+        transport = FakeTransport({"capabilities": reviewed_capabilities()})
+        with mock.patch.object(unlock_tiers, "detect", spy):
+            report = adapter_for(transport).unlock_tier()
+
+        self.assertIsInstance(report, UnlockTierReport)
+        self.assertEqual(report.tier, "answered-by-the-detector")
+        self.assertEqual(report.reasons, ("the detector said so",))
+        self.assertEqual(report.unseparated, (TIER_ROOT,))
+        # ... and it decided from the facts the adapter gathered, not from a
+        # fact set the adapter made up on the way past.
+        self.assertEqual(seen["facts"]["api"]["schema"], "e64local-api-v1")
+        self.assertEqual(seen["facts"]["api"]["status"], 200)
+        self.assertIsNone(seen["facts"]["root"]["channel"])
+        self.assertIsNone(seen["facts"]["root"]["issue"])
+
+    def test_the_report_is_the_detectors_own_document(self) -> None:
+        # No mock: the adapter's output is compared with a direct detect() call
+        # on the adapter's own facts.  A second implementation would have to
+        # reproduce these sentences byte for byte, which is why there is not
+        # one — the sentences are the detector's work, not the adapter's.
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier()
+        direct = unlock_tiers.detect(report.facts)
+
+        self.assertEqual(report.tier, direct["tier"])
+        self.assertEqual(dict(report.evidence), direct["evidence"])
+        self.assertEqual(list(report.reasons), direct["reasons"])
+        self.assertIn("the reviewed module answered past its dev gate", " ".join(report.reasons))
+
+    def test_the_detector_and_the_adapter_cannot_disagree_about_unknown(self) -> None:
+        # The one outcome a consumer is most tempted to paper over.
+        report = adapter_for(FakeTransport({"capabilities": None})).unlock_tier()
+        self.assertEqual(report.tier, unlock_tiers.detect(report.facts)["tier"])
+        self.assertTrue(report.is_unknown)
+
+
+class AdapterOutcomeTests(unittest.TestCase):
+    """One test per outcome, each through the adapter and nothing else."""
+
+    def test_stock_from_the_dev_gate_refusing(self) -> None:
+        transport = FakeTransport(
+            {"capabilities": FakeResponse(403, {"success": False, "errorCode": 403})}
+        )
+        report = adapter_for(transport).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_STOCK)
+        self.assertFalse(report.is_unknown)
+        self.assertTrue(report.evidence["devGateRefused"])
+        self.assertFalse(report.evidence["modulePresent"])
+        # A 403 says nothing about a root channel, so the neighbour is named.
+        self.assertEqual(report.unseparated, (TIER_ROOT, TIER_ROOT_CUSTOM_API))
+        self.assertEqual(transport.routes(), ["capabilities"])
+
+    def test_dev_from_the_reviewed_document(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertEqual(report.evidence["moduleMarkers"][0], "schema")
+        self.assertEqual(report.unseparated, (TIER_ROOT, TIER_ROOT_CUSTOM_API))
+        self.assertTrue(report.at_least(TIER_DEV))
+        self.assertFalse(report.at_least(TIER_ROOT))
+
+    def test_root_from_the_owner_channel_the_caller_holds(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier(
+            local=LocalObservations(channel=True, issue=DEVELOPMENT_ISSUE)
+        )
+
+        self.assertEqual(report.tier, TIER_ROOT)
+        self.assertTrue(report.evidence["rootChannel"])
+        self.assertTrue(report.evidence["devGateOpen"])
+        # Only the runner's rule is left to observe: the top tier, not root.
+        self.assertEqual(report.unseparated, (TIER_ROOT_CUSTOM_API,))
+
+    def test_root_custom_api_from_one_action_prepare(self) -> None:
+        transport = FakeTransport(
+            {
+                # A device whose gate is open: it is the gate that lets a
+                # prepare reach the runner in the first place.
+                "capabilities": reviewed_capabilities(
+                    routes=sorted(READ_ROUTES | ACTION_META_ROUTES),
+                    features={"actions": True, "destructiveActions": False},
+                ),
+                "action_prepare": FakeResponse(200, {"success": True, "data": {"confirmToken": "x"}}),
+            }
+        )
+        report = adapter_for(transport).unlock_tier(
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18})
+        )
+
+        self.assertEqual(report.tier, TIER_ROOT_CUSTOM_API)
+        self.assertEqual(report.unseparated, ())
+        self.assertTrue(report.at_least(TIER_ROOT_CUSTOM_API))
+        self.assertIn("actionAnswered", report.evidence["moduleMarkers"])
+        # A prepare, never an execute: the returned token is discarded.
+        self.assertEqual(transport.routes(), ["capabilities", "action_prepare"])
+
+    def test_root_custom_api_from_the_local_observations(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier(
+            local=LocalObservations(channel=True, issue=DEVELOPMENT_ISSUE, sudoers=True)
+        )
+
+        self.assertEqual(report.tier, TIER_ROOT_CUSTOM_API)
+        self.assertEqual(report.unseparated, ())
+        self.assertTrue(report.evidence["sudoers"])
+
+    def test_unknown_from_an_unreachable_device(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": None})).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_UNKNOWN)
+        self.assertTrue(report.is_unknown)
+        self.assertFalse(report.at_least(TIER_STOCK))
+        self.assertIs(report.evidence["apiReached"], False)
+        self.assertIn("no HTTP response", " ".join(report.notes))
+        self.assertIn("no dev, stock or root signal was observed", " ".join(report.reasons))
+
+
+class AdapterUnknownTests(unittest.TestCase):
+    """An unreachable or unreviewed responder is ``unknown``, never a tier."""
+
+    def test_an_unreviewed_responder_that_says_everything_is_unknown(self) -> None:
+        # Every marker the detector can use, from a schema it does not review:
+        # routes, an API version, an open action gate, a 200 and `devMode`.
+        document = {
+            "success": True,
+            "data": {
+                "schema": "vendor-api-v9",
+                "apiVersion": "1",
+                "routes": sorted(READ_ROUTES | ACTION_META_ROUTES),
+                "features": {"actions": True, "destructiveActions": True},
+                "devMode": True,
+            },
+        }
+        report = adapter_for(FakeTransport({"capabilities": FakeResponse(200, document)})).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_UNKNOWN)
+        self.assertEqual(report.evidence["moduleMarkers"], [])
+        self.assertFalse(report.evidence["modulePresent"])
+        self.assertIn("not a reviewed module schema", " ".join(report.reasons))
+
+    def test_a_500_on_the_read_routes_is_unknown(self) -> None:
+        transport = FakeTransport({"capabilities": FakeResponse(500, None, decodable=False)})
+        report = adapter_for(transport).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_UNKNOWN)
+        self.assertIn("does not settle which image", " ".join(report.reasons))
+        self.assertFalse(report.evidence["modulePresent"])
+        self.assertFalse(report.evidence["moduleAbsent"])
+
+    def test_no_owner_token_is_unknown_and_says_what_would_settle_it(self) -> None:
+        transport = FakeTransport({"capabilities": FakeResponse(401, {"success": False, "errorCode": 401})})
+        report = E64DecaidAdapter(transport).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_UNKNOWN)
+        self.assertIn("401", " ".join(report.reasons))
+        self.assertIn(unlock_tiers.OWNER_TOKEN_HEADER, " ".join(report.reasons))
+        # The probe went out without a token, and no token appeared anywhere.
+        self.assertEqual(transport.call("capabilities")["headers"], {})
+
+    def test_a_document_without_the_reviewed_schema_is_unknown(self) -> None:
+        report = adapter_for(
+            FakeTransport({"capabilities": FakeResponse(200, {"success": True, "data": {"schema": "other"}})})
+        ).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_UNKNOWN)
+        self.assertIn("not a reviewed module schema", " ".join(report.reasons))
+
+
+class AdapterFactHonestyTests(unittest.TestCase):
+    """Facts the adapter cannot justify are passed absent, not guessed."""
+
+    def test_an_unobserved_local_fact_stays_absent(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier()
+
+        self.assertEqual(report.facts["root"], {"channel": None, "issue": None})
+        self.assertIsNone(report.evidence["rootChannel"])
+        self.assertIsNone(report.evidence["issue"])
+        # "not probed" is not "not there": the tier says so itself.
+        self.assertIn(TIER_ROOT, report.unseparated)
+
+    def test_the_issue_line_is_never_taken_from_an_api_answer(self) -> None:
+        # ``detect()`` takes ``root.issue`` at face value with no schema gate,
+        # so the one route that could read /etc/issue over HTTP must not be the
+        # thing that fills it: any responder can serve a development line.
+        transport = FakeTransport(
+            {
+                "capabilities": reviewed_capabilities(),
+                "file": FakeResponse(
+                    200, {"success": True, "data": {"path": "/etc/issue", "text": DEVELOPMENT_ISSUE}}
+                ),
+            }
+        )
+        report = adapter_for(transport).unlock_tier()
+
+        self.assertNotIn("file", transport.routes())
+        self.assertIsNone(report.facts["root"]["issue"])
+        self.assertIsNone(report.evidence["issue"])
+        self.assertEqual(report.tier, TIER_DEV)
+
+    def test_a_root_read_of_the_rule_does_not_erase_a_503(self) -> None:
+        # The caller saw /etc/sudoers.d/e64local and the probe saw the runner
+        # refuse.  Both are observations, and the one that says "this did not
+        # answer" is the one a tier claim must not erase: a present rule with a
+        # runner that refuses is ``root``, not the top tier
+        # (docs/UNLOCK_TIERS.md §2.4, "Runner binary removed").
+        transport = FakeTransport(
+            {
+                "capabilities": reviewed_capabilities(),
+                "action_prepare": FakeResponse(503, {"success": False, "errorCode": 503}),
+            }
+        )
+        report = adapter_for(transport).unlock_tier(
+            local=LocalObservations(channel=True, sudoers=True),
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18}),
+        )
+
+        self.assertEqual(report.tier, TIER_ROOT)
+        self.assertIs(report.facts["api"]["sudoers"], False)
+        self.assertIs(report.evidence["sudoers"], False)
+        # Root, and ruled out of the top tier: nothing is left unseparated.
+        self.assertEqual(report.unseparated, ())
+
+    def test_a_root_read_of_the_rule_reaches_the_top_tier_without_a_probe(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier(
+            local=LocalObservations(channel=True, sudoers=True)
+        )
+
+        self.assertEqual(report.tier, TIER_ROOT_CUSTOM_API)
+        self.assertIs(report.facts["api"]["sudoers"], True)
+
+    def test_the_capabilities_document_alone_never_claims_the_top_tier(self) -> None:
+        # An open action gate and the five meta routes in the handshake are
+        # still not an action answering: the tier stops at dev and names the
+        # two observations that would move it.
+        open_gate = reviewed_capabilities(
+            routes=sorted(READ_ROUTES | ACTION_META_ROUTES),
+            features={"actions": True, "destructiveActions": True},
+        )
+        report = adapter_for(FakeTransport({"capabilities": open_gate})).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertNotIn("action_answered", report.facts["api"])
+        self.assertNotIn("sudoers", report.facts["api"])
+        self.assertEqual(report.unseparated, (TIER_ROOT, TIER_ROOT_CUSTOM_API))
+
+    def test_a_503_probe_rules_the_runner_rule_out(self) -> None:
+        transport = FakeTransport(
+            {
+                "capabilities": reviewed_capabilities(),
+                "action_prepare": FakeResponse(503, {"success": False, "errorCode": 503}),
+            }
+        )
+        report = adapter_for(transport).unlock_tier(
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18})
+        )
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertIs(report.facts["api"]["action_answered"], False)
+        self.assertIs(report.facts["api"]["sudoers"], False)
+        self.assertFalse(report.evidence["sudoers"])
+        # The runner's rule is now excluded, so the only neighbour left is root.
+        self.assertEqual(report.unseparated, (TIER_ROOT,))
+        self.assertIn("503", " ".join(report.notes))
+
+    def test_a_403_probe_does_not_claim_the_runner_ran(self) -> None:
+        # 403 is the closed policy gate, which answers before the runner is
+        # consulted.  It is not evidence for the sudoers rule, so it supplies
+        # no fact; the detector's own reason for that fact stays true.
+        transport = FakeTransport(
+            {
+                "capabilities": reviewed_capabilities(),
+                "action_prepare": FakeResponse(403, {"success": False, "errorCode": 403}),
+            }
+        )
+        report = adapter_for(transport).unlock_tier(
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18})
+        )
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertNotIn("action_answered", report.facts["api"])
+        self.assertEqual(report.unseparated, (TIER_ROOT, TIER_ROOT_CUSTOM_API))
+        self.assertIn("403", " ".join(report.notes))
+
+    def test_an_action_probe_without_the_owner_token_is_not_sent(self) -> None:
+        transport = FakeTransport({"capabilities": reviewed_capabilities()})
+        report = E64DecaidAdapter(transport).unlock_tier(
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18})
+        )
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertEqual(transport.routes(), ["capabilities"])
+        self.assertIn("owner token", " ".join(report.notes))
+
+    def test_the_probe_body_is_a_prepare_with_a_fresh_request_id(self) -> None:
+        transport = FakeTransport(
+            {
+                "capabilities": reviewed_capabilities(),
+                "action_prepare": FakeResponse(200, {"success": True}),
+            }
+        )
+        adapter_for(transport).unlock_tier(
+            action_probe=ActionProbe("action_grind_start_gbw", {"targetWeightGr": 18})
+        )
+        body = transport.call("action_prepare")["body"]
+
+        self.assertEqual(set(body), {"route", "params", "requestId"})
+        self.assertEqual(body["route"], "action_grind_start_gbw")
+        self.assertEqual(body["params"], {"targetWeightGr": 18})
+        # The module's idempotency key: 8..64 of A-Z a-z 0-9 . _ -
+        self.assertRegex(body["requestId"], r"^[A-Za-z0-9._-]{8,64}$")
+
+    def test_the_report_and_its_facts_carry_no_credential(self) -> None:
+        report = adapter_for(FakeTransport({"capabilities": reviewed_capabilities()})).unlock_tier(
+            local=LocalObservations(channel=True, sudoers=True)
+        )
+        encoded = json.dumps(report.as_document()) + json.dumps(report.facts)
+
+        self.assertNotIn(OWNER_TOKEN, encoded)
+        for needle in ("secret", "password", "192.168", "PHPSESSID", "authorization"):
+            self.assertNotIn(needle.lower(), encoded.lower())
+
+    def test_the_local_observations_reject_a_fourth_state(self) -> None:
+        for value in ("false", 0, "no"):
+            with self.subTest(value=value):
+                with self.assertRaises(TypeError):
+                    LocalObservations(channel=value)  # type: ignore[arg-type]
+
+    def test_the_tier_probe_is_gated_by_the_read_permission(self) -> None:
+        transport = FakeTransport({"capabilities": reviewed_capabilities()})
+        adapter = adapter_for(transport, policy=DecaidCapabilityPolicy(allow_read=False))
+
+        with self.assertRaises(E64WSAPIError):
+            adapter.unlock_tier()
+        self.assertEqual(transport.routes(), [])
+        self.assertEqual(adapter.audit_log()[-1].operation, "grinder.tier")
+        self.assertFalse(adapter.audit_log()[-1].allowed)
+
+
+class CannedResponse:
+    """The shape ``urllib`` hands back to ``E64LocalAPI``."""
+
+    def __init__(self, status: int, body: bytes, headers: Mapping[str, str] | None = None) -> None:
+        self.status = status
+        self.body = body
+        self.headers = dict(headers or {})
+
+    def read(self) -> bytes:
+        return self.body
+
+    def __enter__(self) -> "CannedResponse":
+        return self
+
+    def __exit__(self, *_exc: Any) -> bool:
+        return False
+
+
+class RecordedOpen:
+    """Stands in for ``OpenerDirector.open``, keeping each request."""
+
+    def __init__(self, status: int, body: bytes, headers: Mapping[str, str] | None = None) -> None:
+        self.status = status
+        self.body = body
+        self.headers = dict(headers or {})
+        self.requests: list[Any] = []
+
+    def __call__(self, request: Any, timeout: float | None = None) -> CannedResponse:
+        self.requests.append(request)
+        return CannedResponse(self.status, self.body, self.headers)
+
+
+class ProbeTransportTests(unittest.TestCase):
+    """``E64LocalAPI.rest_probe`` is what makes an error status an observation."""
+
+    def test_an_error_status_is_a_response_not_an_exception(self) -> None:
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        error = urllib.error.HTTPError(
+            f"{api.base_url}/rest_api/capabilities",
+            403,
+            "Forbidden",
+            {"Content-Type": "application/json"},
+            io.BytesIO(b'{"success":false,"errorCode":403}'),
+        )
+        self.addCleanup(error.close)
+        with mock.patch.object(api._opener, "open", side_effect=error):
+            response = api.rest_probe("capabilities", {})
+
+        assert response is not None
+        self.assertEqual(response.status, 403)
+        self.assertEqual(response.json()["errorCode"], 403)
+        api.close()
+
+    def test_a_transport_failure_is_no_response(self) -> None:
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        with mock.patch.object(
+            api._opener, "open", side_effect=urllib.error.URLError("connection refused")
+        ):
+            self.assertIsNone(api.rest_probe("capabilities", {}))
+        api.close()
+
+    def test_rest_raw_still_raises_on_an_error_status(self) -> None:
+        # The probe is additive: a failed call is still a failed call.
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        error = urllib.error.HTTPError(
+            f"{api.base_url}/rest_api/grind_log",
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(b'{"errorCode":403}'),
+        )
+        self.addCleanup(error.close)
+        with mock.patch.object(api._opener, "open", side_effect=error):
+            with self.assertRaises(E64WSAPIError):
+                api.rest_raw("grind_log", {})
+        api.close()
+
+    def test_the_owner_token_reaches_the_wire_and_not_the_url(self) -> None:
+        # The whole chain, with no socket: adapter -> consumer -> client ->
+        # request.  The token is a header, never a query parameter.
+        api = E64LocalAPI("127.0.0.1", token="wss-token")
+        opener = RecordedOpen(200, json.dumps(REVIEWED_CAPABILITIES).encode())
+        with mock.patch.object(api._opener, "open", opener):
+            report = E64DecaidAdapter(api, owner_token=OWNER_TOKEN).unlock_tier()
+
+        self.assertEqual(report.tier, TIER_DEV)
+        self.assertEqual(len(opener.requests), 1)
+        request = opener.requests[0]
+        self.assertTrue(request.full_url.endswith("/rest_api/capabilities"))
+        headers = {key.lower(): value for key, value in request.headers.items()}
+        self.assertEqual(headers.get(unlock_tiers.OWNER_TOKEN_HEADER.lower()), OWNER_TOKEN)
+        self.assertNotIn(OWNER_TOKEN, request.full_url)
+        api.close()
 
 
 if __name__ == "__main__":

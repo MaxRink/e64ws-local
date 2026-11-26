@@ -40,5 +40,12 @@ RUN apt-get update \
         gzip \
     && rm -rf /var/lib/apt/lists/*
 
+# The smoke builds its fixture under mktemp -d in /tmp and reads the repository
+# read-only, so it needs no privilege either.
+RUN useradd --create-home --uid 1000 --user-group triage
+
+ENV HOME=/home/triage
+USER triage
+
 WORKDIR /repo
 CMD ["sh", "docker/firmware-triage/smoke.sh"]

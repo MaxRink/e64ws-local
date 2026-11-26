@@ -36,12 +36,16 @@ jobs:
           docker run --rm --entrypoint python local-cloud-service:dev -c \
             'import platform, sys; print(sys.version); print(platform.libc_ver())'
 
-      # No mount: this is exactly what the image carries, so it fails if the
-      # Dockerfile ever stops copying the package or a test stops shipping.
-      - name: Run the suite that ships inside the image
+      # No mount: this is exactly what the image carries.  It asserts the two
+      # things that are true of the runtime image - the service package imports,
+      # and the test package is deliberately absent.  The previous version of
+      # this step ran the suite in here, which could only ever fail: F-10
+      # narrowed the Dockerfile to `COPY tools/local_cloud/*.py` so that
+      # `tools/local_cloud/tests` does not ship.  Serving traffic is the
+      # healthcheck step's job, further down.
+      - name: Assert the image carries the service package and not the tests
         run: |
-          docker run --rm --entrypoint python local-cloud-service:dev \
-            -m unittest tools.local_cloud.tests.local_cloud_test -q
+          docker run --rm --entrypoint python local-cloud-service:dev -c "import importlib.util; service = importlib.util.find_spec('tools.local_cloud.service'); assert service is not None, 'the service package is missing from the image'; tests = importlib.util.find_spec('tools.local_cloud.tests'); assert tests is None, 'the test package ships in the runtime image'; print('service package:', service.origin); print('test package:', tests)"
 
       # The repository is mounted for this one because deploy_pins_test.py reads
       # deploy/local-cloud/{docker-compose.yml,Dockerfile,README.md}.  Those are

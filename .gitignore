@@ -49,3 +49,7 @@ dist/
 
 # Per-session agent planning notes stay local; they duplicate across branches.
 tasks/
+
+# Transcripts tools/capture_setup_screenshots.py keeps next to the setup images.
+# Regenerated on every capture run, never a source file.
+docs/assets/setup/.*.txt

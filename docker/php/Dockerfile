@@ -35,5 +35,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Linting the module needs to read the mount and nothing else, so there is no
+# reason to do it as root.
+RUN useradd --create-home --uid 1000 --user-group php
+
+ENV HOME=/home/php
+USER php
+
 WORKDIR /repo
 CMD ["php", "-v"]

@@ -79,10 +79,23 @@ python3 -m unittest discover -s tests -q
 ```
 
 That root suite is self-contained and passes in a clean clone. `tools/run_tests.py`
-is the private tree's full gate: it expects the research corpus (analysis documents,
-vendor artefacts, recorded evidence) that this repository does not publish, so it is
-not a public entry point, and the `tools/` suites that assert on those files fail
-here for want of their input.
+is the private tree's full gate. Its coverage manifest is clean here, so a test
+file that no suite covers is still a failure, but three things are reported
+instead of run:
+
+- a suite that cannot start at all declares the withheld input in `requires_paths`
+  and reports `SKIP` with that path — this is the deep C++ recon suite, the boot
+  script rehearsal (needs the built `boot.scr`) and the equivalence self-test
+  (needs a recorded vendor baseline);
+- a published test file that reads a withheld document is listed in `EXCLUDED`
+  with the gate's verdict, for example `tools/test_hacks_doc.py`, which reads
+  `docs/HACKS.md`;
+- a suite that can start but contains tests asserting on withheld files still
+  fails, and that is the honest signal: `tools/`, `tools/reimpl/` and
+  `tools/local_cloud/` each carry a handful of such tests, because the analysis
+  documents, recorded evidence and vendor artefacts they read are not published
+  here. `sh tools/run_tests.sh` therefore does not go green in this repository,
+  by design, and the suites that do run are listed in its summary table.
 
 ## Nothing here is vendor-endorsed
 

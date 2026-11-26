@@ -25,9 +25,10 @@ cd apps/android
 ./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-- `minSdk 26`, `targetSdk 36`, `compileSdk 37`.
-- `compileSdk 37` is required by the Compose 1.12 / Lifecycle 2.11 artifacts
-  currently resolved by the Compose BOM; the runtime target stays 36.
+- `minSdk 26`, `targetSdk 36`, `compileSdk 37` (minor release 37.2).
+- `compileSdkMinor = 2` is required by the Compose 1.13 artifacts currently
+  resolved by the Compose BOM, whose AAR metadata demands API 37.1 or later;
+  the runtime target stays 36.
 - Kotlin DSL, Jetpack Compose, no third-party networking library
   (`HttpURLConnection` and a small cookie jar), no analytics or crash SDK.
 - The JVM tests never need an emulator. `org.json` is supplied to the test

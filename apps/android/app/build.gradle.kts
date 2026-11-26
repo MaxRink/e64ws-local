@@ -13,6 +13,10 @@ val phpModuleAsset = layout.projectDirectory.file("src/main/assets/rest_api_dev.
 android {
     namespace = "de.mahlkoenig.e64local"
     compileSdk = 37
+    // The Compose BOM now resolves Compose 1.13.x, whose AAR metadata requires
+    // compiling against API 37.1 or later; 37.2 is the current minor release.
+    // This only raises the APIs visible to the compiler - targetSdk stays 36.
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "de.mahlkoenig.e64local"
@@ -129,7 +133,7 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.11.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 

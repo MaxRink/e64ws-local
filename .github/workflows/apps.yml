@@ -51,7 +51,7 @@ jobs:
           java-version: "21"
       - uses: android-actions/setup-android@v4
       - name: Install the platform the app compiles against
-        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
+        run: sdkmanager "platforms;android-37.2" "build-tools;36.0.0" >/dev/null
       - name: Run the JVM tests
         working-directory: apps/android
         run: ./gradlew --no-daemon :app:testDebugUnitTest

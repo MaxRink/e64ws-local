@@ -23,8 +23,10 @@ from unittest import mock
 
 try:  # imported as ``tools.test_api_coverage``
     from . import api_coverage as coverage
+    from .required_inputs import skip_without
 except ImportError:  # imported from inside ``tools/``
     import api_coverage as coverage  # type: ignore[no-redef]
+    from required_inputs import skip_without  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -803,6 +805,18 @@ class ReaderTests(unittest.TestCase):
 
 class RealTreeTests(unittest.TestCase):
     """The assertion that the shipped tree is 100% documented."""
+
+    def setUp(self) -> None:
+        # coverage.evaluate() reads the research documents; the gate withholds
+        # all five as research prose.  The fixture-driven cases above stay
+        # hermetic and keep running.
+        skip_without([
+            "docs/LOCAL_API.md",
+            "docs/API_COVERAGE.md",
+            "docs/openapi/local-api.yaml",
+            "docs/API_REGISTRY.md",
+            "docs/WEBSOCKET_API.md",
+        ])
 
     def test_real_tree_has_no_unexpected_gaps(self) -> None:
         report = coverage.evaluate(ROOT)

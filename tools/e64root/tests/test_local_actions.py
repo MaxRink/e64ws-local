@@ -8,7 +8,10 @@ These cover the parts the module-level suite does not:
 * simulator parity for the five action meta routes.
 
 The PHP module itself is exercised in ``test_local_api.py``.  No device, no
-network beyond the loopback simulator, no new dependency.
+network beyond the loopback simulator, no new dependency -- except that
+``RunnerJobValidationTests`` runs the real runner in a ``php:8.3-cli`` container
+(``docker pull php:8.3-cli``), the same image requirement the runner enforces
+before it starts this suite.
 """
 
 from __future__ import annotations
@@ -24,7 +27,8 @@ import unittest
 from pathlib import Path
 
 from helpers import FIXTURES  # noqa: F401  (sets sys.path)
-from test_local_api import DOCKER_IMAGE, LOCAL_API_FIXTURES, MODULE, OWNER, RUNNER, docker_ready
+from host_requirements import php_image_problem
+from test_local_api import DOCKER_IMAGE, LOCAL_API_FIXTURES, MODULE, OWNER, RUNNER
 
 from e64local_actions import (
     ACTION_CATALOG,
@@ -808,8 +812,9 @@ class RunnerJobValidationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not docker_ready():
-            raise unittest.SkipTest("php:8.3-cli is not available; runner tests skipped")
+        problem = php_image_problem(DOCKER_IMAGE)
+        if problem is not None:
+            raise unittest.SkipTest(problem)
         cls.temporary = tempfile.TemporaryDirectory()
         root = Path(cls.temporary.name)
         (root / "bin").mkdir()

@@ -33,6 +33,14 @@
 ARG SWIFT_IMAGE
 FROM ${SWIFT_IMAGE} AS probe
 
+# Why this target - alone among the six - has no non-root USER: `swift build`
+# writes a .build/ directory inside the COPY tree below, which is root-owned, so
+# an unprivileged user would need `COPY --chown` on all three COPY lines.  That
+# changes the stage this file exists to keep minimal, and no iOS image is built
+# in this work (docs/REPRODUCIBLE_BUILDS.md section 7), so it would be an
+# unexecuted claim rather than a fix.  The probe stage reads and greps only, but
+# `grindercore` must build to fail, and it must be able to write.
+
 # Copy Sources and Tests by path instead of the package directory: the local
 # tree also holds a macOS .build/ directory with Xcode intermediates, which has
 # no business in a Linux image.

@@ -30,13 +30,19 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import shutil
+import socket
+import sqlite3
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -93,7 +99,7 @@ class ServiceTestCase(unittest.TestCase):
     server: service.LocalCloudServer
 
     def setUp(self) -> None:
-        self.scratch = tempfile.TemporaryDirectory(prefix="local-cloud-test-")
+        self.scratch = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-test-")
         self.addCleanup(self.scratch.cleanup)
         self.db_path = Path(self.scratch.name) / "local-cloud.sqlite3"
         self.audit_path = Path(self.scratch.name) / "audit.jsonl"
@@ -470,7 +476,7 @@ class AdminApiTests(ServiceTestCase):
         self.assertEqual(payload["error"]["reason"], "admin-token-invalid")  # type: ignore[index]
 
     def test_admin_is_disabled_when_no_token_is_configured(self) -> None:
-        with tempfile.TemporaryDirectory() as scratch:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
             server = service.LocalCloudServer(
                 db_path=Path(scratch) / "db.sqlite3", port=0, allow_anonymous=True
             ).start()
@@ -506,7 +512,7 @@ class IdentityRefusalTests(unittest.TestCase):
     """Without a certificate or the development flag, device routes refuse."""
 
     def test_no_identity_is_401(self) -> None:
-        with tempfile.TemporaryDirectory() as scratch:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
             server = service.LocalCloudServer(
                 db_path=Path(scratch) / "db.sqlite3", port=0, allow_anonymous=False
             ).start()
@@ -517,7 +523,7 @@ class IdentityRefusalTests(unittest.TestCase):
         self.assertEqual(payload["error"]["reason"], "client-certificate-required")  # type: ignore[index]
 
     def test_proxy_identity_header_is_only_trusted_on_request(self) -> None:
-        with tempfile.TemporaryDirectory() as scratch:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
             server = service.LocalCloudServer(
                 db_path=Path(scratch) / "db.sqlite3",
                 port=0,
@@ -559,7 +565,7 @@ class MutualTlsTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.scratch = tempfile.TemporaryDirectory(prefix="local-cloud-mtls-")
+        cls.scratch = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-mtls-")
         root = Path(cls.scratch.name)
         cls.pki = root / "pki"
         cls.pki.mkdir()
@@ -612,7 +618,7 @@ class MutualTlsTests(unittest.TestCase):
                 "-CAcreateserial", "-days", "1", "-out", f"{name}.crt")
 
     def setUp(self) -> None:
-        self.work = tempfile.TemporaryDirectory(prefix="local-cloud-mtls-run-")
+        self.work = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-mtls-run-")
         self.addCleanup(self.work.cleanup)
         work = Path(self.work.name)
         self.server = service.LocalCloudServer(
@@ -772,7 +778,7 @@ class CliTests(unittest.TestCase):
             process.stdout.close()
 
     def test_cli_serves_healthz_and_the_501_for_system_time(self) -> None:
-        scratch = tempfile.TemporaryDirectory(prefix="local-cloud-cli-")
+        scratch = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-cli-")
         self.addCleanup(scratch.cleanup)
         port = service.free_port()
         audit = Path(scratch.name) / "audit.jsonl"
@@ -818,6 +824,894 @@ class CliTests(unittest.TestCase):
         fields = {gap["field"] for route in document["routes"] for gap in route["unknown"]}
         self.assertIn("D10.response.format", fields)
 
+
+# ---------------------------------------------------------------------------
+# Application-layer hardening (F-02 .. F-20)
+#
+# One case per finding in the application-layer audit.  Each one failed against
+# the code it was written for; the docstring records the fix it pins down.
+# ---------------------------------------------------------------------------
+
+
+def raw_exchange(
+    port: int, payload: bytes, *, timeout: float = 10.0, headers_only: bool = False
+) -> bytes:
+    """Send bytes on a fresh connection and return whatever the server sends.
+
+    Used where ``http.client`` will not express the request: a negative
+    ``Content-Length``, a method with no ``do_`` handler, a half-open connection.
+    A peer that closes early makes our own ``sendall`` fail; the reply may still
+    be buffered, so that is not an error here.
+    """
+
+    received = bytearray()
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+        try:
+            connection.sendall(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        while True:
+            try:
+                chunk = connection.recv(65536)
+            except TimeoutError:
+                break
+            except ConnectionResetError:
+                # The server refused before reading the body, so it drops the
+                # connection with that body still queued and the kernel answers
+                # with RST.  Whatever it sent before that is already in
+                # ``received``; there will be no clean EOF after it.
+                break
+            if not chunk:
+                break
+            received.extend(chunk)
+            if headers_only and b"\r\n\r\n" in received:
+                break
+    return bytes(received)
+
+
+def raw_status(response: bytes) -> int:
+    """HTTP status from a raw reply, or 0 when nothing came back."""
+
+    line = response.split(b"\r\n", 1)[0].split(b" ")
+    return int(line[1]) if len(line) > 1 and line[1].isdigit() else 0
+
+
+class RequestFramingTests(ServiceTestCase):
+    """F-02: ``Content-Length`` is attacker input, so only a decimal is acted on."""
+
+    fire = "/api/device-service/device-event/fire"
+
+    def fire_head(self, content_length: bytes) -> bytes:
+        return (
+            b"POST " + self.fire.encode() + b" HTTP/1.0\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + content_length + b"\r\n\r\n"
+        )
+
+    def device_event_rows(self) -> list:
+        with self.server.store.session() as connection:
+            return connection.execute("SELECT * FROM device_event").fetchall()
+
+    def test_negative_content_length_is_refused_without_reading_to_eof(self) -> None:
+        # ``-1`` is not greater than the cap, so the old code reached
+        # ``rfile.read(-1)`` and waited for EOF.  No body is sent: a server that
+        # still waits blocks here and the test fails on the empty reply instead
+        # of buffering whatever the attacker cares to send.
+        response = raw_exchange(self.server.port, self.fire_head(b"-1"), timeout=3.0)
+        self.assertTrue(response, "the server must answer rather than read to EOF")
+        self.assertEqual(raw_status(response), 400)
+        self.assertIn(b'"reason":"content-length-invalid"', response)
+        self.assertEqual(self.device_event_rows(), [])
+
+    def test_negative_content_length_two_is_400_not_a_500(self) -> None:
+        # ``read(-2)`` raised ValueError and answered 500 with the exception
+        # class in the body.
+        response = raw_exchange(self.server.port, self.fire_head(b"-2") + b"{}", timeout=3.0)
+        self.assertEqual(raw_status(response), 400, response[:200])
+        self.assertIn(b'"reason":"content-length-invalid"', response)
+        self.assertNotIn(b"ValueError", response)
+
+    def test_non_numeric_content_length_is_refused_not_read_as_zero(self) -> None:
+        # Treated as 0, the body was dropped and the request answered 200 as if
+        # it had never been sent.
+        response = raw_exchange(self.server.port, self.fire_head(b"about-100") + b"{}", timeout=3.0)
+        self.assertEqual(raw_status(response), 400, response[:200])
+        self.assertIn(b'"reason":"content-length-invalid"', response)
+        self.assertEqual(self.device_event_rows(), [], "the body was executed as if it were empty")
+
+    def test_a_negative_length_cannot_push_more_than_the_cap_through(self) -> None:
+        # The audit recorded this case as 8.4 MB buffered on a 1 MiB route, as
+        # bytes_in=8388592.  The proof is that number, not the reply: the server
+        # now refuses from the header and drops the connection with the body
+        # still queued, so the kernel may answer with RST and the client may or
+        # may not collect the 400.  ``bytes_in`` is written server-side either
+        # way, so it is the assertion that holds in both worlds.
+        oversized = b"x" * (8 * 1024 * 1024)
+        response = raw_exchange(self.server.port, self.fire_head(b"-1") + oversized, timeout=30.0)
+        if response:
+            self.assertEqual(raw_status(response), 400, response[:200])
+            self.assertIn(b'"reason":"content-length-invalid"', response)
+        for row in self.server.store.audit_rows(limit=10):
+            detail = json.loads(row["detail"])
+            self.assertLess(
+                detail.get("bytes_in", 0),
+                service.MAX_FIRE_BODY,
+                "an 8 MiB body was buffered past the 1 MiB cap",
+            )
+        self.assertEqual(self.device_event_rows(), [])
+
+    def test_an_absurdly_long_content_length_is_400_not_a_conversion_error(self) -> None:
+        # ``int()`` refuses more than 4300 digits; the refusal has to come from
+        # the header check, not from an exception inside it.
+        response = raw_exchange(self.server.port, self.fire_head(b"9" * 5000), timeout=5.0)
+        self.assertEqual(raw_status(response), 400, response[:200])
+        self.assertIn(b'"reason":"content-length-invalid"', response)
+
+    def test_a_genuinely_oversize_body_is_413_from_the_header_alone(self) -> None:
+        # Regression guard for the cap the rewrite must not lose: the refusal
+        # comes from the declared length, so no body is sent at all.
+        response = raw_exchange(self.server.port, self.fire_head(b"8388608"), timeout=3.0)
+        self.assertEqual(raw_status(response), 413, response[:200])
+        self.assertIn(b'"reason":"body-too-large"', response)
+
+
+class ContentTypeTests(ServiceTestCase):
+    """F-17: a body route must declare ``application/json``."""
+
+    def test_text_plain_on_a_body_route_is_refused(self) -> None:
+        status, payload, _ = self.call(
+            "POST",
+            f"{DEVICE}/device-event/fire",
+            {"eventUuid": "ct-1"},
+            headers={"Content-Type": "text/plain"},
+        )
+        self.assertEqual(status, 415)
+        self.assertEqual(payload["error"]["reason"], "unsupported-media-type")  # type: ignore[index]
+        with self.server.store.session() as connection:
+            self.assertIsNone(connection.execute("SELECT id FROM device_event").fetchone())
+
+    def test_parameters_on_the_media_type_are_ignored(self) -> None:
+        status, payload, _ = self.call(
+            "POST",
+            f"{DEVICE}/device-event/fire",
+            {"eventUuid": "ct-2", "eventType": "GRIND_COMPLETE"},
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        self.assertEqual(status, 200, payload)
+
+    def test_a_missing_content_type_is_accepted_but_recorded(self) -> None:
+        # Refusing on *absence* would be a wire-format guess.  The firmware is
+        # evidenced to send application/json (74 of 74 captured device-service
+        # requests, plus the firmware observation at 0x265d58), but a client that
+        # never did would break, so the gap is recorded and the request served.
+        body = b'{"eventUuid":"no-ct-1"}'
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=10)
+        try:
+            connection.putrequest("POST", f"{DEVICE}/device-event/fire")
+            connection.putheader("Content-Length", str(len(body)))
+            connection.endheaders(body)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            response.read()
+        finally:
+            connection.close()
+        rows = [
+            row for row in self.server.store.audit_rows(limit=10) if row["action"] == "request"
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0]["detail"])["content_type"], "absent")
+
+    def test_an_explicitly_wrong_media_type_is_refused(self) -> None:
+        for declared in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data"):
+            with self.subTest(content_type=declared):
+                status, payload, _ = self.call(
+                    "POST",
+                    f"{DEVICE}/device-event/fire",
+                    {"eventUuid": "ct-strict"},
+                    headers={"Content-Type": declared},
+                )
+                self.assertEqual(status, 415, payload)
+                self.assertEqual(
+                    payload["error"]["reason"], "unsupported-media-type"  # type: ignore[index]
+                )
+
+
+class SlowConnectionTests(unittest.TestCase):
+    """F-03: a half-open connection must give its thread back."""
+
+    def setUp(self) -> None:
+        self.scratch = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-slow-")
+        self.addCleanup(self.scratch.cleanup)
+        self.server = service.LocalCloudServer(
+            db_path=Path(self.scratch.name) / "db.sqlite3",
+            port=0,
+            allow_anonymous=True,
+            request_timeout=2.0,
+            max_concurrent=2,
+        ).start()
+        self.addCleanup(self.server.close)
+
+    def test_idle_connections_are_cut_off_and_the_rest_are_shed_as_503(self) -> None:
+        idle = [
+            socket.create_connection(("127.0.0.1", self.server.port), timeout=10.0)
+            for _ in range(2)
+        ]
+        for connection in idle:
+            self.addCleanup(connection.close)
+            # A request line with no terminator: the shape slowloris sends.
+            connection.sendall(b"GET /healthz HTTP/1.")
+
+        # Both slots are taken.  Poll instead of sleeping a fixed time, so the
+        # test does not depend on how fast the machine is.
+        deadline = time.monotonic() + 1.5
+        shed = b""
+        while time.monotonic() < deadline:
+            # A data-plane path: /healthz is exempt from the gate by design, so
+            # probing with it would never show the bound working.
+            reply = raw_exchange(
+                self.server.port, b"GET /api/device-service/system/time HTTP/1.0\r\n\r\n", timeout=5.0
+            )
+            if raw_status(reply) == 503:
+                shed = reply
+                break
+            time.sleep(0.05)
+        self.assertTrue(shed, "concurrency was not bounded: no connection was shed as 503")
+        self.assertIn(b'"reason":"too-many-connections"', shed)
+
+        # ... and the slots come back: the server closes the idle sockets itself
+        # instead of holding a thread each until the process ends.
+        for connection in idle:
+            connection.settimeout(10.0)
+            self.assertEqual(
+                connection.recv(4096), b"", "an idle connection was never closed by the server"
+            )
+        status, payload, _ = request(self.server.port, "GET", "/healthz")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")  # type: ignore[index]
+
+    def saturate(self) -> list[socket.socket]:
+        """Hold every gate slot with a connection that sends no complete request."""
+
+        idle = [
+            socket.create_connection(("127.0.0.1", self.server.port), timeout=10.0)
+            for _ in range(2)
+        ]
+        for connection in idle:
+            self.addCleanup(connection.close)
+            connection.sendall(b"GET /api/device-service/system/time HTTP/1.")
+        return idle
+
+    def shed_rows(self) -> list[dict]:
+        return [
+            row
+            for row in self.server.store.audit_rows(limit=store.MAX_AUDIT_LIMIT)
+            if json.loads(row["detail"]).get("reason") == "too-many-connections"
+        ]
+
+    def test_the_liveness_probe_answers_while_the_gate_is_saturated(self) -> None:
+        # The image HEALTHCHECK runs exactly this request with --retries=3, so a
+        # 503 here restarts a container that is merely under load.
+        self.saturate()
+        deadline = time.monotonic() + 3.0
+        shed = b""
+        while time.monotonic() < deadline and not shed:
+            reply = raw_exchange(
+                self.server.port, b"GET /api/device-service/system/time HTTP/1.0\r\n\r\n", timeout=5.0
+            )
+            if raw_status(reply) == 503:
+                shed = reply
+            else:
+                time.sleep(0.05)
+        self.assertTrue(shed, "the gate never shed a data-plane request")
+
+        status, payload, _ = request(self.server.port, "GET", "/healthz")
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["status"], "ok")  # type: ignore[index]
+
+    def test_rotating_partial_lines_cannot_starve_the_probe(self) -> None:
+        # R-1: the probe lane was taken *before* the request line was read, so a
+        # client sending "GET /healthz HTTP/1." with no terminator held a lane
+        # for the whole of SHED_LINE_TIMEOUT.  Twenty-odd of those starved the
+        # genuine probe into 503 - the same restart loop, for 15 bytes each.
+        #
+        # Timing-sensitive by construction: it asserts every one of ten probes
+        # answered 200 under load, so a machine that stalls the probe threads for
+        # longer than their socket timeout fails it.  That is the property the
+        # review asked for - the failure it catches is a real outage - so treat a
+        # single failure as "re-run and look", not as "raise the numbers".
+        self.saturate()
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+
+        def churn() -> None:
+            while not stop.is_set():
+                try:
+                    with socket.create_connection(
+                        ("127.0.0.1", self.server.port), timeout=2.0
+                    ) as connection:
+                        connection.sendall(b"GET /healthz HTTP/1.")
+                        connection.recv(64)
+                except OSError:
+                    pass
+
+        workers = [threading.Thread(target=churn, daemon=True) for _ in range(24)]
+        for worker in workers:
+            worker.start()
+        time.sleep(0.2)
+        outcomes = []
+        for _ in range(10):
+            status, _, _ = request(self.server.port, "GET", "/healthz")
+            outcomes.append(status)
+        stop.set()
+        for worker in workers:
+            worker.join(timeout=5.0)
+        self.assertEqual(
+            outcomes, [200] * 10, f"the probe was starved: {outcomes.count(503)}/10 answered 503"
+        )
+
+    def test_a_shed_connection_leaves_a_visible_record(self) -> None:
+        # Before: log_message is silenced and the 503 only went to the socket, so
+        # an attack left no trace in the table, the audit file or the log.
+        self.saturate()
+        reply = raw_exchange(
+            self.server.port, b"GET /api/device-service/system/time HTTP/1.0\r\n\r\n", timeout=5.0
+        )
+        self.assertEqual(raw_status(reply), 503)
+        deadline = time.monotonic() + 5.0
+        payload: dict = {}
+        while time.monotonic() < deadline:
+            status, payload, _ = request(self.server.port, "GET", "/healthz")
+            self.assertEqual(status, 200)
+            if payload.get("connections_shed", 0) >= 1 and self.shed_rows():
+                break
+            time.sleep(0.05)
+        self.assertGreaterEqual(
+            payload.get("connections_shed", 0), 1, "the shed counter stayed at zero"
+        )
+        rows = self.shed_rows()
+        self.assertTrue(rows, "a shed connection left no audit row")
+        detail = json.loads(rows[0]["detail"])
+        self.assertEqual(detail["status"], 503)
+        self.assertGreaterEqual(detail["shed_total"], 1)
+        # Rate-limited: a burst of sheds must not become an audit amplification.
+        self.assertLessEqual(len(rows), 2)
+
+
+class AuditHygieneTests(ServiceTestCase):
+    """F-04 and F-12: what the audit records, and how much of it."""
+
+    def test_a_long_path_cannot_write_a_large_audit_row(self) -> None:
+        # ``http.server`` accepts a 65 536-byte request line, and the path was
+        # stored twice and untruncated.
+        path = f"{DEVICE}/" + "a" * 60_000
+        status, _, _ = self.call("GET", path)
+        self.assertEqual(status, 404)
+        rows = self.server.store.audit_rows(limit=5)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertLess(
+            len(row["subject"]) + len(row["detail"]),
+            4096,
+            "one unauthenticated request wrote a large audit row",
+        )
+        self.assertLessEqual(len(row["subject"]), store.MAX_AUDIT_SUBJECT)
+        detail = json.loads(row["detail"])
+        self.assertNotIn("route", detail, "the request path was recorded twice")
+
+    def test_every_method_is_audited_including_ones_with_no_handler(self) -> None:
+        cases = (
+            (b"OPTIONS /api/device-service/system/time HTTP/1.0\r\n\r\n", "OPTIONS"),
+            (b"TRACE /api/device-service/system/time HTTP/1.0\r\n\r\n", "TRACE"),
+            (b"CONNECT example.com:443 HTTP/1.0\r\n\r\n", "CONNECT"),
+            (b"BREW /api/device-service/system/time HTTP/1.0\r\n\r\n", "BREW"),
+        )
+        for payload, method in cases:
+            with self.subTest(method=method):
+                before = len(self.server.store.audit_rows())
+                response = raw_exchange(self.server.port, payload, timeout=5.0)
+                self.assertTrue(response, f"{method} got no reply")
+                self.assertIn(
+                    b"application/json",
+                    response.lower(),
+                    f"{method} fell through to the stdlib HTML 501",
+                )
+                rows = self.server.store.audit_rows(limit=store.MAX_AUDIT_LIMIT)
+                self.assertEqual(len(rows), before + 1, f"{method} left no audit row")
+                self.assertEqual(json.loads(rows[0]["detail"])["method"], method)
+
+
+class BrokenPipeWriter:
+    """A ``wfile`` that fails the way a peer hanging up makes a write fail."""
+
+    closed = False
+
+    def write(self, data: bytes) -> int:
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class BrokenPipeHandler(service.LocalCloudHandler):
+    """The real handler with only its output stream replaced."""
+
+    def setup(self) -> None:
+        super().setup()
+        self.wfile = BrokenPipeWriter()  # type: ignore[assignment]
+
+
+class ClientHangUpTests(unittest.TestCase):
+    """F-12: a hang-up during the reply must not rewrite what was decided."""
+
+    def test_a_hang_up_during_the_reply_cannot_write_a_500_into_the_audit(self) -> None:
+        scratch = tempfile.TemporaryDirectory(ignore_cleanup_errors=True, prefix="local-cloud-hangup-")
+        self.addCleanup(scratch.cleanup)
+        server = service.LocalCloudServer(
+            db_path=Path(scratch.name) / "db.sqlite3",
+            port=0,
+            allow_anonymous=True,
+            admin_token="test-admin-token-not-a-credential",
+        )
+        # Fault injection rather than a race: the client is replaced by a stream
+        # that raises exactly as a disconnected peer's socket does, at the exact
+        # call the real one fails in.
+        server._http.RequestHandlerClass = BrokenPipeHandler  # type: ignore[attr-defined]
+        server.start()
+        self.addCleanup(server.close)
+
+        for _ in range(3):
+            raw_exchange(server.port, b"GET /healthz HTTP/1.0\r\n\r\n", timeout=5.0)
+
+        # ``/healthz`` is a liveness probe and is not audited; before the fix its
+        # reply was written inside the route's try, so the BrokenPipe became an
+        # "unhandled-exception" 500 in the table for a request answered 200.
+        self.assertEqual(server.store.audit_rows(limit=20), [], "a hang-up fabricated an audit row")
+
+        # A route that *is* audited keeps the status it decided.
+        raw_exchange(server.port, b"GET /api/device-service/system/time HTTP/1.0\r\n\r\n", timeout=5.0)
+        rows = server.store.audit_rows(limit=5)
+        self.assertEqual(len(rows), 1)
+        detail = json.loads(rows[0]["detail"])
+        self.assertEqual(detail["status"], 501)
+        self.assertEqual(detail["reason"], "timestamp-format-unknown")
+
+
+class StorageBoundTests(ServiceTestCase):
+    """F-05: one device cannot decide how large the database gets."""
+
+    def test_a_200kb_body_is_not_stored_as_200kb(self) -> None:
+        body = {"eventType": "SERVICE_EVENT", "eventUuid": "big-1", "blob": "x" * 200_000}
+        status, payload, _ = self.call("POST", f"{DEVICE}/device-event/fire", body)
+        self.assertEqual(status, 200, payload)
+        with self.server.store.session() as connection:
+            row = connection.execute(
+                "SELECT payload, length(payload) AS size FROM device_event"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertLess(row["size"], 32 * 1024, "a 200 KB body was stored as 200 KB")  # type: ignore[index]
+        stored = json.loads(row["payload"])  # type: ignore[index]
+        self.assertTrue(stored["_truncated"])
+        self.assertGreater(stored["_original_bytes"], 200_000)
+
+    def test_rows_per_device_are_bounded(self) -> None:
+        # The bound is a module constant so it can be tightened without touching
+        # the write path; lowering it here keeps the test to eight writes instead
+        # of two hundred while still going through ``record_onboarding``.
+        keep = 5
+        original = store.MAX_ROWS_PER_DEVICE
+        self.addCleanup(setattr, store, "MAX_ROWS_PER_DEVICE", original)
+        store.MAX_ROWS_PER_DEVICE = keep
+        for index in range(keep + 3):
+            self.server.store.record_onboarding("local-dev-device", {"n": index})
+        records = self.server.store.onboarding_records("local-dev-device")
+        self.assertEqual(len(records), keep)
+        self.assertEqual(
+            [json.loads(record["payload"])["n"] for record in records],
+            [3, 4, 5, 6, 7],
+            "the newest rows are the ones kept",
+        )
+
+
+class RedactionBypassTests(ServiceTestCase):
+    """F-06: a secret under an unknown key, or inside a string, is still a secret."""
+
+    secrets = (
+        "nested-string-epsilon-12cd",
+        "passphrase-beta-7d21",
+        "wifi-psk-alpha-3f9c",
+        "pwd-gamma-55ab",
+        "bare-key-delta-08e4",
+    )
+
+    def stored_bytes(self) -> bytes:
+        """Every byte this run persisted: the database, its WAL siblings and the audit mirror."""
+
+        blobs = []
+        for candidate in (
+            self.db_path,
+            Path(f"{self.db_path}-wal"),
+            Path(f"{self.db_path}-shm"),
+            self.audit_path,
+        ):
+            if candidate.exists():
+                blobs.append(candidate.read_bytes())
+        return b"\n".join(blobs)
+
+    def test_the_three_proven_payloads_store_no_plaintext(self) -> None:
+        payloads = (
+            # 1. JSON embedded in a string value: never inspected before.
+            {"eventUuid": "r1", "settings": json.dumps(
+                {"productionWifiPassword": "nested-string-epsilon-12cd", "ssid": "n"}
+            )},
+            # 2. key names the vocabulary did not know.
+            {"eventUuid": "r2", "Passphrase": "passphrase-beta-7d21",
+             "wifiPsk": "wifi-psk-alpha-3f9c"},
+            # 3. the short names, including ``key``.
+            {"eventUuid": "r3", "pwd": "pwd-gamma-55ab", "key": "bare-key-delta-08e4"},
+        )
+        for body in payloads:
+            status, _, _ = self.call("POST", f"{DEVICE}/device-event/fire", body)
+            self.assertEqual(status, 200)
+
+        haystack = self.stored_bytes()
+        self.assertIn(store.REDACTED.encode(), haystack)
+        for secret in self.secrets:
+            self.assertFalse(
+                secret.encode() in haystack, f"{secret} reached the database in plaintext"
+            )
+
+    def test_the_nested_encodings_found_leaking_are_closed(self) -> None:
+        # Each of these reached the database in plaintext before N-3.
+        cases = {
+            "double-encoded JSON": (
+                json.dumps(json.dumps({"productionWifiPassword": "double-secret-1"})),
+                "double-secret-1",
+            ),
+            "form-urlencoded": (
+                "ssid=home&productionWifiPassword=form-secret-2&mode=5",
+                "form-secret-2",
+            ),
+            "xml element": (
+                "<cfg><productionWifiPassword>xml-secret-3</productionWifiPassword></cfg>",
+                "xml-secret-3",
+            ),
+            "xml attribute": (
+                '<cfg productionWifiPassword="xml-secret-4"/>',
+                "xml-secret-4",
+            ),
+            "accented key": ({"pässword": "accent-secret-5"}, "accent-secret-5"),
+        }
+        for label, (shape, secret) in cases.items():
+            with self.subTest(shape=label):
+                rendered = json.dumps(store.redact({"v": shape}), ensure_ascii=False)
+                self.assertNotIn(secret, rendered, f"{label} was not redacted: {rendered[:120]}")
+                self.assertIn(store.REDACTED, rendered)
+
+    def test_the_documented_residual_is_still_documented(self) -> None:
+        # N-3 asked for the residual to be stated, not implied away.  A
+        # mixed-script homoglyph key is the one case this does not fold, and the
+        # module docstring says so; this test fails if that note is deleted.
+        docstring = store.__doc__ or ""
+        for required in ("homoglyph", "base64", "free-text"):
+            self.assertIn(required, docstring, f"the residual note lost {required!r}")
+
+    def test_innocent_keys_and_innocent_embedded_json_are_left_alone(self) -> None:
+        for innocent in ("keys", "monkey", "someKey", "grinderSn", "lastChange"):
+            self.assertEqual(store.redact({innocent: "keep"}), {innocent: "keep"}, innocent)
+        # A string that happens to be JSON but hides nothing keeps its exact text.
+        encoded = '{"a": 1, "b": [1, 2]}'
+        self.assertEqual(store.redact({"blob": encoded}), {"blob": encoded})
+
+
+class FileModeTests(unittest.TestCase):
+    """F-07: the database, WAL, SHM and audit file are private from creation."""
+
+    def test_every_stored_file_is_0600_even_under_a_permissive_umask(self) -> None:
+        # A container runs with 022; the store must not depend on that.
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
+            db = Path(scratch) / "db.sqlite3"
+            audit = Path(scratch) / "audit.jsonl"
+            store.Store(db, audit_file=audit).audit(
+                actor="device:x", action="request", subject="/x", detail={}
+            )
+            modes: dict[str, int] = {}
+            with closing(sqlite3.connect(db)) as connection:
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("SELECT count(*) FROM audit").fetchone()
+                for candidate in (db, Path(f"{db}-wal"), Path(f"{db}-shm"), audit):
+                    self.assertTrue(candidate.exists(), candidate.name)
+                    modes[candidate.name] = f"{stat.S_IMODE(candidate.stat().st_mode):04o}"
+        self.assertEqual(
+            modes,
+            {"db.sqlite3": "0600", "db.sqlite3-wal": "0600", "db.sqlite3-shm": "0600", "audit.jsonl": "0600"},
+        )
+
+
+class HeaderAndArtifactTests(ServiceTestCase):
+    """F-11, F-14, F-15, F-16, F-18 and F-20: the small refusals that were wrong."""
+
+    admin = {"Authorization": "Bearer test-admin-token-not-a-credential"}
+
+    def test_a_non_ascii_bearer_token_is_401_not_500(self) -> None:
+        status, payload, _ = self.call(
+            "GET", "/admin/v1/audit", headers={"Authorization": "Bearer tökén-non-ascii"}
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(payload["error"]["reason"], "admin-token-invalid")  # type: ignore[index]
+        self.assertNotIn("TypeError", json.dumps(payload))
+
+    def test_the_audit_limit_is_clamped(self) -> None:
+        # SQLite reads LIMIT -1 as "no limit", so ?limit=-1 returned everything.
+        # Six rows are enough to tell "the whole table" from "one row".
+        for index in range(6):
+            self.server.store.audit(actor="device:x", action="request", subject=f"/s/{index}", detail={})
+        status, payload, _ = self.call("GET", "/admin/v1/audit?limit=-1", headers=self.admin)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload["entries"]), 1)  # type: ignore[index]
+        self.assertEqual(store.clamp_audit_limit(-1), 1)
+        self.assertEqual(store.clamp_audit_limit(10**6), store.MAX_AUDIT_LIMIT)
+        self.assertEqual(store.clamp_audit_limit("not-a-number"), store.DEFAULT_AUDIT_LIMIT)
+
+    def test_a_huge_interval_is_treated_as_absent(self) -> None:
+        # A 30-digit value is a fine Python int and an impossible SQLite INTEGER,
+        # so binding it raised OverflowError and answered 500.
+        status, payload, _ = self.call(
+            "GET", f"{DEVICE}/device-event/status?interval=" + "9" * 30
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertIsNone(self.server.store.status_for("local-dev-device")["interval_s"])  # type: ignore[index]
+        status, _, _ = self.call("GET", f"{DEVICE}/device-event/status?interval=-5")
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.server.store.status_for("local-dev-device")["interval_s"])  # type: ignore[index]
+        # A malformed sign and a value too long for ``int()`` must be absent too,
+        # not a 500 out of the conversion.
+        for hostile in ("%2B-300", "9" * 300):
+            with self.subTest(interval=hostile[:12]):
+                status, payload, _ = self.call(
+                    "GET", f"{DEVICE}/device-event/status?interval={hostile}"
+                )
+                self.assertEqual(status, 200, payload)
+                self.assertIsNone(
+                    self.server.store.status_for("local-dev-device")["interval_s"]  # type: ignore[index]
+                )
+        # ... and the in-range case still records what the device said.
+        status, _, _ = self.call("GET", f"{DEVICE}/device-event/status?interval=300")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.server.store.status_for("local-dev-device")["interval_s"], 300)  # type: ignore[index]
+
+    def test_a_non_hex_sha256_is_refused_and_never_served_to_a_device(self) -> None:
+        status, payload, _ = self.call(
+            "POST",
+            "/admin/v1/firmware",
+            {"filename": "x.swu", "version": "V1", "sha256": "z" * 64, "admitted": True},
+            headers=self.admin,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["reason"], "artifact-fields-invalid")  # type: ignore[index]
+        self.assertIn("hexadecimal", payload["error"]["message"])  # type: ignore[index]
+        self.assertIsNone(self.server.store.admitted_artifact_above(None))
+
+    def test_the_pem_body_carries_nosniff_and_json_does_not(self) -> None:
+        self.server.store.enrol_credential(
+            "local-dev-device",
+            "AB" * 32,
+            cert_pem="-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        )
+        status, payload, headers = self.call("GET", f"{DEVICE}/system/device-cert-download")
+        self.assertEqual(status, 200)
+        self.assertIn("BEGIN CERTIFICATE", payload)  # type: ignore[operator]
+        self.assertEqual(headers.get("x-content-type-options"), "nosniff")
+
+        status, _, json_headers = self.call("GET", f"{DEVICE}/system/time")
+        self.assertEqual(status, 501)
+        self.assertNotIn("x-content-type-options", json_headers)
+
+    def test_the_download_url_carries_exactly_one_firmware_segment(self) -> None:
+        status, _, _ = self.call(
+            "POST",
+            "/admin/v1/firmware",
+            {
+                "filename": "HEM-HSG-HMI-S01-V01.16-24.swu",
+                "version": "V01.16-24",
+                "sha256": "a" * 64,
+                "admitted": True,
+            },
+            headers=self.admin,
+        )
+        self.assertEqual(status, 200)
+        status, payload, _ = self.call(
+            "GET", f"{DEVICE}/firmware/checkUpdate?currentVer=V01.14-08"
+        )
+        self.assertEqual(status, 200)
+        url = payload["downloadUrl"]  # type: ignore[index]
+        self.assertEqual(url, "http://127.0.0.1:8080/firmware/HEM-HSG-HMI-S01-V01.16-24.swu")
+        self.assertEqual(url.count("/firmware"), 1)
+
+    def test_a_filename_that_is_not_one_path_segment_is_refused(self) -> None:
+        for filename in ("../../etc/passwd", "sub/dir.swu", "..swu", ".hidden", "x" * 300):
+            with self.subTest(filename=filename[:20]):
+                status, payload, _ = self.call(
+                    "POST",
+                    "/admin/v1/firmware",
+                    {"filename": filename, "version": "V9", "sha256": "b" * 64, "admitted": True},
+                    headers=self.admin,
+                )
+                self.assertEqual(status, 400, payload)
+                self.assertEqual(payload["error"]["reason"], "artifact-filename-invalid")  # type: ignore[index]
+
+class AuditAmplificationTests(ServiceTestCase):
+    """N-2: no single request may write an unbounded audit row.
+
+    The F-04 fix capped the *subject* and dropped the duplicate ``detail.route``,
+    but ``detail.method`` is copied straight off the request line, which
+    ``http.server`` allows to be 65 536 bytes long.  A request with a 60 000-byte
+    method token therefore wrote a 60 259-byte row for one request - the same
+    amplification, through a different field.
+    """
+
+    def request_rows(self, limit: int = 20) -> list[dict]:
+        return [
+            row
+            for row in self.server.store.audit_rows(limit=limit)
+            if row["action"] == "request"
+        ]
+
+    def test_a_long_method_token_cannot_write_a_large_audit_row(self) -> None:
+        payload = b"FOO" + b"X" * 60_000 + b" /api/device-service/system/time HTTP/1.0\r\n\r\n"
+        response = raw_exchange(self.server.port, payload, timeout=10.0)
+        self.assertTrue(response, "the server never answered")
+        rows = self.request_rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        detail = json.loads(row["detail"])
+        self.assertLessEqual(len(detail["method"]), store.MAX_AUDIT_METHOD)
+        self.assertLess(
+            len(row["subject"]) + len(row["detail"]),
+            4096,
+            "one request wrote a large audit row through detail.method",
+        )
+
+    def test_device_chosen_key_names_are_bounded_in_the_audit(self) -> None:
+        # D09 records the body's key names; the device chooses them.
+        body = {f"{index:04d}-{'k' * 60}": index for index in range(40)}
+        status, _, _ = self.call("POST", f"{DEVICE}/system/onboarding", body)
+        self.assertEqual(status, 200)
+        # D09 writes two rows: the request, and the stored-body row that carries
+        # the key names.
+        rows = [
+            row
+            for row in self.server.store.audit_rows(limit=10)
+            if row["action"] == "onboarding-stored"
+        ]
+        self.assertEqual(len(rows), 1)
+        detail = json.loads(rows[0]["detail"])
+        self.assertLessEqual(len(detail["keys"]), store.MAX_AUDIT_KEYS)
+        self.assertLess(max(len(key) for key in detail["keys"]), store.MAX_AUDIT_KEY_LEN + 1)
+        self.assertLess(len(rows[0]["detail"]), store.MAX_AUDIT_DETAIL + 512)
+
+    def test_the_detail_column_is_bounded_even_for_a_field_with_no_cap(self) -> None:
+        # The backstop: a field added later without its own bound still cannot
+        # write an unbounded row, and the meaningful scalars survive the cut.
+        original = store.MAX_AUDIT_DETAIL
+        self.addCleanup(setattr, store, "MAX_AUDIT_DETAIL", original)
+        store.MAX_AUDIT_DETAIL = 256
+        self.server.store.audit(
+            actor="anonymous",
+            action="request",
+            subject="/s",
+            detail={"status": 405, "reason": "method-not-supported", "blob": "y" * 4000},
+        )
+        detail = json.loads(self.request_rows(limit=1)[0]["detail"])
+        self.assertTrue(detail["_truncated"])
+        self.assertEqual(detail["status"], 405, "the truncation lost the decided status")
+        self.assertEqual(detail["reason"], "method-not-supported")
+        self.assertNotIn("blob", detail)
+
+
+class TransferEncodingTests(ServiceTestCase):
+    """N-6: a chunked body must be refused, not silently read as empty."""
+
+    fire = "/api/device-service/device-event/fire"
+
+    def test_a_chunked_body_is_refused_instead_of_ignored(self) -> None:
+        payload = (
+            b"POST " + self.fire.encode() + b" HTTP/1.0\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
+            b"1a\r\n{\"eventUuid\":\"chunked-1\"}\r\n0\r\n\r\n"
+        )
+        response = raw_exchange(self.server.port, payload, timeout=5.0)
+        self.assertEqual(raw_status(response), 400, response[:200])
+        self.assertIn(b'"reason":"transfer-encoding-unsupported"', response)
+        with self.server.store.session() as connection:
+            self.assertIsNone(
+                connection.execute("SELECT id FROM device_event").fetchone(),
+                "a chunked body was ignored and the request stored as if empty",
+            )
+            self.assertEqual(
+                connection.execute("SELECT bytes_in FROM (SELECT 0 AS bytes_in)").fetchone()[0], 0
+            )
+
+    def test_transfer_encoding_with_a_content_length_is_refused_too(self) -> None:
+        # The ambiguous framing a request smuggler relies on.
+        payload = (
+            b"POST " + self.fire.encode() + b" HTTP/1.0\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: 2\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
+            b"2\r\n{}\r\n0\r\n\r\n"
+        )
+        response = raw_exchange(self.server.port, payload, timeout=5.0)
+        self.assertEqual(raw_status(response), 400, response[:200])
+        self.assertIn(b'"reason":"transfer-encoding-unsupported"', response)
+        rows = [
+            row for row in self.server.store.audit_rows(limit=10) if row["action"] == "request"
+        ]
+        self.assertEqual(json.loads(rows[0]["detail"])["reason"], "transfer-encoding-unsupported")
+
+class ImageHardeningTests(unittest.TestCase):
+    """F-10 and F-08: what the shipped image carries, and what the context does."""
+
+    dockerfile = ROOT / "deploy" / "local-cloud" / "Dockerfile"
+
+    def test_the_runtime_image_is_upgraded_pip_free_and_carries_no_tests(self) -> None:
+        text = self.dockerfile.read_text(encoding="utf-8")
+        self.assertIn(
+            "apk upgrade --no-cache",
+            text,
+            "the base packages are never upgraded, so the image keeps the CVEs the base shipped",
+        )
+        self.assertIn(
+            "pip uninstall",
+            text,
+            "the runtime never imports pip, so it should not ship the scanner findings in it",
+        )
+        # Uninstalling pip leaves the *bundled wheel* that `python -m ensurepip`
+        # would install from, which the scanner still reports.  Assert on the
+        # executable line, not on the substring "ensurepip" anywhere: the comment
+        # above the RUN also says ensurepip, so a substring check stayed green
+        # after the `rm -rf` was deleted - the exact regression this catches.
+        removals = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip().startswith("rm -rf") and "ensurepip" in line
+        ]
+        self.assertEqual(
+            len(removals),
+            1,
+            "no `rm -rf` line removes the bundled ensurepip wheel; deleting it "
+            "leaves `python -m ensurepip` able to put pip back",
+        )
+        copies = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip().upper().startswith("COPY ") and "local_cloud" in line
+        ]
+        self.assertEqual(len(copies), 1, copies)
+        self.assertIn(
+            "tools/local_cloud/*.py",
+            copies[0],
+            "the whole package directory is copied, which ships the test suite in the image",
+        )
+
+    def test_the_root_build_context_excludes_the_expensive_trees_only(self) -> None:
+        ignore = ROOT / ".dockerignore"
+        self.assertTrue(ignore.exists(), "the repository-root build context has no .dockerignore")
+        patterns = {
+            line.strip()
+            for line in ignore.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        self.assertIn("firmware/", patterns)
+        # local-cloud and ios-grindercore are the two builds whose context is the
+        # repository root, and these are the trees their Dockerfiles COPY.
+        for needed in ("tools/", "tools/local_cloud/", "apps/"):
+            self.assertNotIn(needed, patterns, f"{needed} is COPYed by a root-context Dockerfile")
 
 if __name__ == "__main__":
     unittest.main()

@@ -77,6 +77,17 @@ from tools.e64local_actions import (  # noqa: E402  (path set above)
     ACTION_CATALOG,
     ACTION_META_ROUTES,
 )
+from tools.required_inputs import skip_without  # noqa: E402  (path set above)
+
+
+def setUpModule() -> None:
+    """Skip the whole document check when the document is not carried here.
+
+    ``docs/`` is research prose and the export gate withholds it, so the
+    published subset has no ``docs/HACKS.md`` to check.  Here the file exists and
+    every assertion below runs exactly as before.
+    """
+    skip_without(["docs/HACKS.md"])
 
 #: The three evidence labels, in the order the document introduces them.
 LABELS: tuple[str, ...] = ("documented", "inferred", "needs hardware")

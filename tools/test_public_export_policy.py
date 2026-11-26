@@ -21,6 +21,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "public_export.py"
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.required_inputs import skip_without  # noqa: E402  (path set above)
+
+
+def setUpModule() -> None:
+    """Skip when the gate itself is not carried here.
+
+    ``tools/public_export.py`` is ``own-code`` / ``never``: it quotes the deny
+    patterns it refuses, so it cannot publish itself.  The policy it enforces is
+    still pinned here, where both files exist.
+    """
+    skip_without(["tools/public_export.py"])
+
 # Exploit and root tooling is published on purpose: the owner's decision, and
 # the already-published mirror (github.com/MaxRink/e64ws-local) ships it.  This
 # test pins that decision so a later reviewer cannot withhold it by accident.

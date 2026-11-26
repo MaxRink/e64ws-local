@@ -21,6 +21,19 @@ RESULTS = FINDINGS / "results-fresh-swu.json"
 DOC = ROOT / "docs" / "FINDINGS_REPRODUCTION.md"
 STATUSES = {"reproduced", "partly", "static-only", "not reproduced", "latent", "superseded"}
 
+from tools.required_inputs import skip_without  # noqa: E402  (ROOT is on sys.path)
+
+
+def setUpModule() -> None:
+    """Every case here reads the recorded results or the generated document.
+
+    Both are withheld from the published subset -- the results are `evidence`
+    and the document is research prose -- so the module is skipped there with
+    the first missing path named.  Here both exist and nothing is skipped.
+    """
+    skip_without(["tools/verify_findings/results-fresh-swu.json", "docs/FINDINGS_REPRODUCTION.md"])
+
+
 # Advisory findings that a live check bears on.  A finding-level status that
 # disagrees with its own checks is the defect this mapping exists to catch.
 FINDING_CHECKS = {

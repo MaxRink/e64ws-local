@@ -14,6 +14,11 @@
 #   sh docker/verify.sh --clean         # mount a pristine export of HEAD, not the work tree
 #   sh docker/verify.sh --list          # what exists, without building
 #   sh docker/verify.sh --selftest      # scaffold invariants only, no docker calls
+#   sh docker/verify.sh --only android --allow-skip  # a declared-only target, deliberately
+# Exit status is 0 only when at least one target was built and proved.  A run
+# that skipped every target exits 1 unless --allow-skip says the skip is the
+# point, because "passed 0, failed 0, skipped 1" is not a green run: nothing was
+# built, so nothing was verified.
 #
 # --clean exists because "the image works" must not depend on somebody else's
 # uncommitted file: the suite's coverage manifest fails on any test_*.py that is
@@ -50,7 +55,9 @@ KNOWN_HANG='recon-cxx'
 SUITE_TIMEOUT=${SUITE_TIMEOUT:-600}
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    # Print from the `# Usage:` heading to the next paragraph break, so a line
+    # added above or below cannot silently truncate --help.
+    sed -n '/^# Usage:/,/^#$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
 target_image() {
@@ -120,6 +127,40 @@ assert_contains() {
     fi
 }
 
+# The suite order tools/run_tests.py will use, as printed by the runner itself.
+# Only consulted when a run is bounded, so it costs nothing on a green run.
+runner_suite_order() {
+    docker run --rm -v "$SOURCE:/repo:ro" -w /repo/tools "$1" \
+        python -c 'import run_tests; print(" ".join(suite.name for suite in run_tests.SUITES))' \
+        2>/dev/null
+}
+
+# A bounded run (exit 124) is the known hang exactly when the runner's last suite
+# is KNOWN_HANG and every earlier suite reported.  tools/run_tests.py prints a
+# suite's `== name ==` header only after that suite has finished, so the hanging
+# suite is precisely the one whose header never appears: checking the last
+# *visible* header against KNOWN_HANG could never succeed, which is why this
+# compares the reported count against the runner's own order instead of trusting
+# a hand-maintained list.
+bounded_run_is_the_known_hang() {
+    # Names are prefixed because POSIX sh has no `local`, and smoke_python
+    # carries `image`/`passes` in the same globals.
+    _image=$1
+    _reported=$2
+    _order=$(runner_suite_order "$_image") || return 1
+    [ -n "$_order" ] || return 1
+    # shellcheck disable=SC2086
+    set -- $_order
+    _total=$#
+    _last=$1
+    for _name in "$@"; do
+        _last=$_name
+    done
+    [ "$_last" = "$KNOWN_HANG" ] || return 1
+    # Every suite except the one that hung must have reported a header.
+    [ "$_reported" -eq $(( _total - 1 )) ]
+}
+
 python_version() {
     case $1 in
         py311) printf '3.11\n' ;;
@@ -141,11 +182,13 @@ smoke_python() {
     # Two suites cannot be green inside a plain container, and both reasons are
     # properties of the repository's runner rather than of this image:
     #
-    #   e64root     the runner requires 269 tests, but the 35 PHP-module tests in
-    #               PhpModuleCase and RunnerJobValidationTests are skipped when
-    #               no docker CLI is present (docker_ready() in
-    #               tools/e64root/tests/test_local_api.py), so 234 < 269 and the
-    #               suite reports FAIL on its own minimum.
+    #   e64root     the 35 container tests in PhpModuleCase and
+    #               RunnerJobValidationTests need a docker CLI and a local
+    #               php:8.3-cli image (tools/run_tests.py declares it in
+    #               docker_images and probes it before discovery), so inside a
+    #               container the suite reports ERROR with
+    #               "php:8.3-cli is not available; docker pull php:8.3-cli" or
+    #               "docker is not installed; ..." instead of running.
     #   recon-cxx   the host gateway binary compiles and then does not terminate
     #               in any Linux container tested (Debian 12 g++ 12.2/glibc 2.36
     #               and Debian 13 g++ 14.2/glibc 2.41), while it completes on the
@@ -173,9 +216,9 @@ smoke_python() {
     fi
     if [ "$status" -eq 0 ]; then
         assert_contains "$output" 'Result: PASS' "$target" || return 1
-    elif [ "$status" -eq 124 ] && [ "$last_suite" = "$KNOWN_HANG" ]; then
+    elif [ "$status" -eq 124 ] && bounded_run_is_the_known_hang "$image" "$headers"; then
         printf '    WARN %s: the run stopped in %s, the known Linux hang; %s earlier suites passed\n' \
-            "$target" "$last_suite" "$passes"
+            "$target" "$KNOWN_HANG" "$passes"
     else
         printf 'verify: %s: suite command exited %s in suite %s (%s headers, %s passes)\n' \
             "$target" "$status" "$last_suite" "$headers" "$passes" >&2
@@ -314,16 +357,18 @@ skip_target() {
             printf 'SKIP %s: no reason recorded\n' "$target"
             ;;
     esac
-    printf '%s %s SKIP heavy\n' "$target" "$(target_image "$target")" >>"$SUMMARY"
+    printf '%s %s SKIP declared-only\n' "$target" "$(target_image "$target")" >>"$SUMMARY"
     SKIPPED=$((SKIPPED + 1))
 }
 
 mode=default
 only=
 clean=0
+allow_skip=0
 while [ $# -gt 0 ]; do
     case $1 in
         --all) mode=all ;;
+        --allow-skip) allow_skip=1 ;;
         --only)
             [ $# -ge 2 ] || { printf 'verify: --only needs a target\n' >&2; exit 2; }
             only=$2
@@ -406,11 +451,42 @@ if [ "$clean" = 1 ]; then
         printf 'verify: the HEAD export in %s looks empty\n' "$CLEAN_TREE" >&2
         exit 2
     fi
+    # `git archive` writes no repository metadata, and the suites now include
+    # tests that run git against the checkout they are given (tools.test_public_export
+    # calls `git status --porcelain` and refuses a --repo that is not a repository),
+    # so a bare export fails them for a reason that has nothing to do with the image.
+    # Give the export a throwaway repository of its own: the *content* is still
+    # exactly HEAD, which is the property --clean exists to provide.
+    if ! git -C "$CLEAN_TREE" init -q \
+        || ! git -C "$CLEAN_TREE" add -A \
+        || ! git -C "$CLEAN_TREE" -c user.name=verify -c user.email=verify@localhost \
+            commit -q -m 'git archive HEAD'; then
+        printf 'verify: could not give the HEAD export a throwaway repository\n' >&2
+        exit 2
+    fi
+    # The images run as uid 1000 (see docker/python/Dockerfile), and mktemp -d
+    # creates a 0700 directory owned by whoever ran this script, so the export has
+    # to be opened up or every container would fail to read /repo.
+    chmod -R a+rX "$CLEAN_TREE"
     SOURCE=$CLEAN_TREE
 elif command -v git >/dev/null 2>&1; then
     if [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
         printf 'verify: NOTE the work tree has uncommitted changes, so the Python\n'
         printf '        suite result describes them too.  Use --clean to test HEAD.\n'
+    fi
+fi
+
+# The images do not run as root, so a file the container's uid 1000 cannot read
+# fails the run for a reason the image did not cause.  Say so instead of letting
+# it surface as a permission error from inside a suite.
+if [ "$clean" != 1 ]; then
+    unreadable=$(find "$SOURCE" -path "$SOURCE/.git" -prune -o \
+        -type f ! -perm -o=r -print 2>/dev/null | head -n 3)
+    if [ -n "$unreadable" ]; then
+        printf 'verify: NOTE these files are not world-readable, and the images run\n'
+        printf '        as a non-root user, so a smoke may fail to read them:\n'
+        printf '%s\n' "$unreadable" | sed 's/^/        /'
+        printf '        (chmod -R a+rX %s, or use --clean)\n' "$SOURCE"
     fi
 fi
 
@@ -442,4 +518,21 @@ done <"$SUMMARY"
 printf '\npassed %s, failed %s, skipped %s\n' "$PASSED" "$FAILED" "$SKIPPED"
 if [ "$FAILED" -ne 0 ]; then
     exit 1
+fi
+
+# A skip is not a pass.  `--only android` (or any invocation whose targets are
+# all declared-only) builds nothing, so its exit status must not be 0: a CI step
+# that reads "passed 0, failed 0, skipped 1" as success is testing the skip line
+# rather than the image.  --allow-skip is the explicit way to say the skip is the
+# whole point, and it is required rather than assumed.
+if [ "$PASSED" -eq 0 ]; then
+    if [ "$allow_skip" = 1 ]; then
+        printf 'verify: 0 passed, %s skipped; --allow-skip was given, so exit 0\n' "$SKIPPED"
+    else
+        printf 'verify: 0 passed, %s skipped: nothing was built and nothing was proved\n' \
+            "$SKIPPED" >&2
+        printf 'verify: a skipped target is not a pass; re-run with --allow-skip if a\n' >&2
+        printf '        declared-only target is what you meant to check.\n' >&2
+        exit 1
+    fi
 fi

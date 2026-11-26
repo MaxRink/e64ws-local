@@ -5,7 +5,7 @@ version: 2
 #
 # The repository's own tooling is deliberately standard-library-only, but it
 # still has manifests: the reimplementation's requirements, the Android Gradle
-# build, two Dockerfiles and the local-cloud compose stack. Alerts and
+# build, three Dockerfiles and the local-cloud compose stack. Alerts and
 # automated security fixes are enabled at repository level; this file is what
 # makes version updates arrive too.
 #
@@ -16,7 +16,33 @@ version: 2
 #     require block, although the module is cross-built per
 #     docs/bible/operations.md;
 #   - npm, pub, gitsubmodule and devcontainers: this repository has no
-#     package.json, pubspec.yaml, .gitmodules or devcontainer.json.
+#     package.json, pubspec.yaml, .gitmodules or devcontainer.json;
+#   - docker for the six other targets under docker/ (android, firmware-triage,
+#     ios-grindercore, node, php, python): every one of them is
+#     `FROM ${SOMETHING_IMAGE}` and the value lives in docker/images.env, which
+#     is the single file the pins are written in. Dependabot reads `FROM` in a
+#     Dockerfile and has no ecosystem for an env file, so an entry per directory
+#     would parse nothing and open nothing. docker/images.env is updated by hand;
+#     docker/README.md is the map and docker/selftest.py checks it;
+#   - docker-compose for /docker: docker/compose.yaml only builds local targets
+#     (e64-py:3.11 and friends) and interpolates every base image from
+#     docker/images.env, so there is no registry image in it to bump.
+#
+# Six dependencies are deliberately held rather than left out; two of them are
+# suppressed here so they cannot reopen, because moving them is a re-baseline and
+# not an update:
+#
+#   suppressed - ubuntu in /tools/rebuild/buildroot/docker, and the postgres
+#                major in /deploy/local-cloud. Each entry's own comment says why.
+#   not suppressed, documented instead - php (8.4, matched to the device's
+#                8.4.16), eclipse-temurin (21, the documented Android/Ghidra
+#                toolchain), swift (6.3, the pin the iOS probe is declared
+#                against) and debian (12, the dev-env base). These should still
+#                arrive as PRs and be answered, not hidden.
+#
+# All six are recorded in docs/DEPENDENCY_AUDIT.md with the registry version that
+# was NOT adopted and the evidence for the hold. Everything not in that list
+# tracks the registry.
 
 updates:
   - package-ecosystem: pip
@@ -71,6 +97,23 @@ updates:
           - patch
 
   - package-ecosystem: docker
+    directory: /deploy/local-cloud
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    # The one Dockerfile under deploy/ that pins its base inline -
+    # `FROM python:3.15-alpine@sha256:...` - instead of taking it from an ARG,
+    # which is what makes it visible to Dependabot at all. The docker-compose
+    # entry below reads the compose file, not this Dockerfile, so without this
+    # entry the base image is tracked by nothing. The digest is the multi-arch
+    # index digest, so a bump moves the tag and the digest together; answering
+    # one means rebuilding the image and running the local-cloud suite -
+    # deploy/local-cloud/Dockerfile points at README.md "Verify image pins".
+
+  - package-ecosystem: docker
     directory: /docker/dev-env
     schedule:
       interval: weekly
@@ -87,6 +130,23 @@ updates:
       time: "05:45"
       timezone: Europe/Berlin
     open-pull-requests-limit: 5
+    # Not a dependency to keep current: this Dockerfile is the host that produced
+    # the digests in tools/rebuild/buildroot/results/. On 26.04 its apt list has
+    # no qemu-user-static candidate, and GCC 15.2 / Python 3.14 / make 4.4 move
+    # the CRT objects those digests consist of, so a bump is a re-baseline of the
+    # study, not an update. Without this, #34 reopens. The cost is written down
+    # in docs/REPRODUCIBLE_BUILDS.md, "Deliberately pinned".
+    ignore:
+      # Dependabot names this dependency "ubuntu" for FROM ubuntu:22.04, not the
+      # Docker Hub repository path library/ubuntu: #34 reports
+      # package-manager=docker&dependency-name=ubuntu and titles itself
+      # "Bump ubuntu from 22.04 to 26.04". 22.04 -> 26.04 parses as a major
+      # update and 22.04 -> 22.10 as a minor one, so both are excluded and
+      # neither an LTS nor an interim release can reopen it.
+      - dependency-name: "ubuntu"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: docker-compose
     directory: /deploy/local-cloud
@@ -96,6 +156,17 @@ updates:
       time: "05:50"
       timezone: Europe/Berlin
     open-pull-requests-limit: 5
+    # postgres is held at 18.7 while 19.0 exists.  19.0 has no point release,
+    # db is an unused template, and 19 moves PGDATA to
+    # /var/lib/postgresql/19/docker so every existing 18 cluster becomes as
+    # unreachable as a 16 one.  Moving majors is a dump-and-restore path, not a
+    # tag bump - deploy/local-cloud/README.md "Upgrading from 16" prices it, and
+    # docs/DEPENDENCY_AUDIT.md records the decision.  Only the major is
+    # suppressed, so 18.x patch releases still arrive.
+    ignore:
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: github-actions
     directory: /

@@ -126,7 +126,7 @@ services:
   # ----------------------------------------------------------------------
   db:
     profiles: ["postgres"]
-    image: postgres:16.4-alpine
+    image: postgres:18.7-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: "${POSTGRES_DB:-localcloud}"
@@ -134,7 +134,11 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-replace-me}"
       TZ: "UTC"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 18+ stores the cluster in a major-version subdirectory (PGDATA is
+      # /var/lib/postgresql/18/docker), so the mount has to be the parent:
+      # a mount at .../data is detected as a pre-18 leftover and the container
+      # refuses to start.  See docker-library/postgres#1259.
+      - pgdata:/var/lib/postgresql
     networks:
       - internal
     healthcheck:

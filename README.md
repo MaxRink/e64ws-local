@@ -56,9 +56,9 @@ read them cannot run here.
   Git LFS pointers, and any path under `firmware/`, `.tools/`, `captures/`, `dist/`,
   `decaid/`, `docs/bible/`, `docs/LEGAL/` or `docs/evidence/`. The patterns are
   not reproduced here for the obvious reason. The exported tree was
-  then re-scanned by a second, independent implementation before the first push:
-  **0 findings across 460 files, 4,755,814 bytes**, largest file 169,274 B. This
-  README and `SECURITY.md` are the only files the exporter did not produce.
+  then re-scanned by a second, independent implementation:
+  **0 findings across 448 files, 5,181,805 bytes**, largest file 169,274 B
+  (`apps/android/app/src/main/assets/rest_api_dev.php`).
 - **No binaries and no keys.** No firmware images, no compiled vendor artefacts, no
   private keys or password hashes, no LFS objects, no submodules.
 - **Workflows are included; Actions is off.** The three workflow definitions are the
@@ -82,9 +82,11 @@ That root suite is self-contained and passes in a clean clone. `tools/run_tests.
 runs what this repository carries and says plainly what it does not:
 
 - a suite whose input is withheld declares it in `requires` and reports `SKIP`
-  naming the missing path — the deep C++ recon suite (reconstructed vendor
-  sources), the boot-script rehearsal (a built `boot.scr`) and the equivalence
-  self-test (a recorded vendor capture baseline);
+  naming the missing path — four of them here: the deep C++ recon suite
+  (reconstructed vendor sources), the boot-script rehearsal (a built `boot.scr`),
+  the equivalence self-test (a recorded vendor capture baseline) and
+  `export-policy` (the exporter itself, which is never published because it
+  quotes the patterns it refuses);
 - a module this repository does not carry, or whose data is withheld, is declared
   with the input that makes its absence legitimate; its declared share comes off
   the suite floor and it is listed as not run with that path, so the modules that
@@ -113,8 +115,15 @@ void its warranty or its support arrangements.
 
 ## Provenance
 
-The tree was produced from the private research repository at commit `b369505` by an
-allow-list exporter: every file except this README and `SECURITY.md` is a verbatim
-copy of a tracked blob from that commit. The policy the exporter enforces, including
-the list of what it refuses and why, is deliberately not part of this repository —
+The tree was produced from the private research repository at commit `143f633` by an
+allow-list exporter, which on that commit selects 448 files totalling 5,181,805
+bytes. Of those, 447 are verbatim copies of the tracked blob here; `SECURITY.md`
+is maintained here instead, because the version below is a superset of the
+research one. The remaining 47 tracked paths are files this repository published
+before the exporter existed and still carries — the reconstruction tooling under
+`tools/rebuild/`, `tools/ghidra/` and `tools/qml/`, and a handful of helpers —
+which the gate now withholds. `diff -r` of two independent exporter runs exits 0,
+so the 447 are reproducible rather than asserted. The policy the exporter
+enforces, including the list of what it refuses and why, is deliberately not part
+of this repository —
 its deny-list contains the very literals it scans for.

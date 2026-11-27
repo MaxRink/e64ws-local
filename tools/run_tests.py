@@ -195,11 +195,16 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
         "tools",
         ROOT,
         note="unit modules under tools/",
-        # 339 is what this suite collects: 290 from #63's five runner tests, 20
-        # from tools/test_capture_setup_screenshots.py (#60) and 29 from this
-        # branch's unlock-tier consumer tests.  Measured; leave a module out and
-        # its tests are deletable in silence.
-        minimum=339,
+        # 386 is what this suite collects: the 376 #78 measured — 290 from #63's
+        # five runner tests, 20 from tools/test_capture_setup_screenshots.py
+        # (#60), 29 from the unlock-tier consumer tests, 5 more public-export
+        # tests from #75, and 32 from tools/test_unlock_tier_e2e.py and
+        # tools/test_unlock_tiers.py — plus the 10 in
+        # tools/test_audit_citations.py, which resolves docs/DEPENDENCY_AUDIT.md's
+        # citation table, pins the bound its `Now says` check really has, and
+        # asserts the checkout CI performs carries the history that pin needs.
+        # Measured; leave a module out and its tests are deletable in silence.
+        minimum=386,
         modules=(
             "tools.test_e64ws_client",
             "tools.test_e64ws_simulator",
@@ -220,9 +225,18 @@ SUITES: tuple[UnittestSuite | FunctionSuite | CommandSuite, ...] = (
             Module("tools.test_findings_reproduction", minimum=21,
                    requires=("tools/verify_findings/results-fresh-swu.json",
                              "docs/FINDINGS_REPRODUCTION.md")),
-            Module("tools.test_public_export", minimum=15, requires=("tools/public_export.py",)),
+            Module("tools.test_public_export", minimum=20, requires=("tools/public_export.py",)),
             "tools.test_capture_setup_screenshots",
             "tools.test_unlock_tiers",
+            # Resolves every `path:line` in docs/DEPENDENCY_AUDIT.md's citation
+            # table against the commit this module pins, checks the table is
+            # exactly the rows it names, and asserts tests.yml checks out the
+            # history that pin needs.  Its subject is research prose the export
+            # gate withholds, so it declares the doc and skips in the subset
+            # instead of failing there.
+            Module("tools.test_audit_citations", minimum=10,
+                   requires=("docs/DEPENDENCY_AUDIT.md",)),
+            "tools.test_unlock_tier_e2e",
             "tools.test_run_tests",
         ),
     ),

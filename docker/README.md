@@ -13,7 +13,7 @@ only the map.
 | [`firmware-triage/Dockerfile`](firmware-triage/Dockerfile) | `bsdtar`, `e2fsprogs`, `openssl`, `python3` |
 | [`firmware-triage/smoke.sh`](firmware-triage/smoke.sh) | Builds a signed `.swu` fixture and triages it |
 | [`node/Dockerfile`](node/Dockerfile) | Node 26 for the decaid plugin suites |
-| [`android/Dockerfile`](android/Dockerfile) | JDK 21 + SDK 37 + Gradle 9.9.2, declaration only |
+| [`android/Dockerfile`](android/Dockerfile) | JDK 21 + SDK platform 37.2 + build-tools 36.0.0 + Gradle 9.9.2; the image builds, the app build is not run |
 | [`ios-grindercore/Dockerfile`](ios-grindercore/Dockerfile) | Swift 6 on Linux, a reproducer that is expected to fail |
 | [`compose.yaml`](compose.yaml) | The same targets for `docker compose`; the heavy two sit behind a profile |
 | [`verify.sh`](verify.sh) | Builds every enabled target and asserts one command per target |

@@ -341,9 +341,12 @@ skip_target() {
     case $target in
         android)
             printf '\n== %s -> %s ==\n' "$target" "$(target_image "$target")"
-            printf 'SKIP android: Dockerfile only. Building it downloads the Android SDK\n'
-            printf '     behind a licence prompt and the Gradle/Maven graph; the SDK\n'
-            printf '     package names and the commandline-tools checksum are unverified.\n'
+            printf 'SKIP android: not built by this script, because the layer set needs\n'
+            printf '     the Android SDK behind a licence prompt.  The image was built\n'
+            printf '     and verified separately on 2026-11-26 -- all six layers, running\n'
+            printf '     as uid=1000(ubuntu); docs/REPRODUCIBLE_BUILDS.md section 6.\n'
+            printf '     Still unverified there: the Gradle/Maven build the CMD runs, and\n'
+            printf '     the commandline-tools SHA-256 (CMDLINE_TOOLS_SHA256 is unset).\n'
             printf '     See docker/android/Dockerfile and docs/REPRODUCIBLE_BUILDS.md.\n'
             ;;
         ios-grindercore)
